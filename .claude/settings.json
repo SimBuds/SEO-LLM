@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(scripts/ollama_call.sh:*)",
+      "Bash(bash scripts/ollama_call.sh:*)",
+      "Bash(./scripts/ollama_call.sh:*)",
+      "Bash(curl -sS http://localhost:11434/*)",
+      "Bash(curl -s http://localhost:11434/*)",
+      "Bash(jq:*)",
+      "Bash(yq:*)",
+      "Bash(ollama list)",
+      "Bash(ollama ps)"
+    ]
+  }
+}
