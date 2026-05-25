@@ -150,19 +150,23 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - Files: `prompts/outline.md`, `.claude/skills/seo-outline.md`, update `seo-draft` to consume the outline.
 - Goal: outline generated first and saved as `outline.md`; draft follows it.
 
-### Phase 3 — Section-by-section drafting
+### Phase 3 — Brief ingest from .docx / .pdf / .md / .txt
+- Files: `prompts/ingest.md`, `.claude/skills/seo-ingest.md`, `.claude/settings.json` (allow `pandoc` + `pdftotext`), `PLAN.md`, `README.md`.
+- Goal: `/seo-ingest <file>` extracts text (pandoc for .docx, pdftotext for .pdf, passthrough for .md/.txt) and emits `briefs/<slug>.yaml` matching the brief schema for the user to review before running `/seo-outline`.
+
+### Phase 4 — Section-by-section drafting
 - Files: update `seo-draft` to loop sections; `prompts/intro.md`, `prompts/conclusion.md`.
 - Goal: each outline section → its own Ollama call, stitched into `final.md`.
 
-### Phase 4 — Humanization rewrite (Llama)
+### Phase 5 — Humanization rewrite (Llama)
 - Files: `prompts/rewrite.md`, `.claude/skills/seo-rewrite.md`, helper supports model swap.
 - Goal: post-draft rewrite pass with `llama-custom` reduces repetition.
 
-### Phase 5 — Metadata + keywords
+### Phase 6 — Metadata + keywords
 - Files: `prompts/metadata.md`, `prompts/keywords.md`, `.claude/skills/seo-metadata.md`, `.claude/skills/seo-keywords.md`.
 - Goal: title, description, slug, FAQ, keyword expansion written to `meta.json`.
 
-### Phase 6 — Docs + SEO knowledge base
+### Phase 7 — Docs + SEO knowledge base
 - Files: `README.md`, `docs/google/{helpful-content,eeat,semantic-search,ai-content-guidelines}.md`, link from system prompt.
 - Goal: prompts ground in EEAT / helpful-content guidance; quickstart documented.
 

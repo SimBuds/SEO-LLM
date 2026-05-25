@@ -6,6 +6,8 @@ Local-first SEO content pipeline driven by **Claude Code** (CC) as the runtime a
 
 ```
 User in Claude Code
+  ├─ /seo-ingest  <doc.docx|doc.pdf|doc.md>  (Phase 3 — optional: doc → YAML brief)
+  │    └─ pandoc / pdftotext → qwen-custom → writes briefs/<slug>.yaml
   ├─ /seo-outline briefs/<brief>.yaml        (Phase 2 — outline first)
   │    └─ scripts/ollama_call.sh qwen-custom prompts/outline.md
   │         └─ writes outputs/<slug>/outline.md
@@ -47,6 +49,7 @@ seo-cli/
   - `llama-custom` — rewrite / humanization (Phase 4+). Build with `~/ai/build-llama`.
   - Verify: `ollama list` should show both tags.
 - **`jq`** and **`curl`** on `PATH` (the wrapper uses them).
+- **`pandoc`** (for `.docx` ingest) and **`pdftotext`** from `poppler-utils` (for `.pdf` ingest). Only needed if you use `/seo-ingest`.
 - **Claude Code** open in this repo so slash commands resolve.
 
 ## Quickstart
@@ -57,12 +60,14 @@ seo-cli/
    ollama list | grep -E 'qwen-custom|llama-custom'
    ```
 2. Drop a brief into `briefs/` (see [briefs/example.yaml](briefs/example.yaml) for the schema).
-3. In Claude Code, run the outline first, then the draft:
+3. **Option A — start from a YAML brief.** Drop a brief into `briefs/` (see [briefs/example.yaml](briefs/example.yaml)).
+   **Option B — start from a doc.** Run `/seo-ingest path/to/source.{docx,pdf,md,txt}` to extract a YAML brief into `briefs/<slug>.yaml`, then review/edit it.
+4. In Claude Code, run the outline first, then the draft:
    ```
    /seo-outline briefs/example.yaml
    /seo-draft   briefs/example.yaml
    ```
-4. Inspect `outputs/<slug>/outline.md` and `outputs/<slug>/draft.md`.
+5. Inspect `outputs/<slug>/outline.md` and `outputs/<slug>/draft.md`.
 
 ## The Ollama wrapper
 
@@ -89,4 +94,4 @@ The skill substitutes these into `prompts/section.md` placeholders (`{{BRIEF}}`,
 
 Read [AGENTS.md](AGENTS.md) before making changes. The short version: one phase at a time, ≤5 files per phase, walking-skeleton first, verify end-to-end against live Ollama, and end each phase with the literal handoff line.
 
-Current state: **Phase 2 (outline stage) complete** — `/seo-outline` produces an outline, `/seo-draft` drafts from it. Next up is Phase 3 (section-by-section drafting) — see [PLAN.md](PLAN.md).
+Current state: **Phase 3 (doc/PDF ingest) complete** — `/seo-ingest` produces a YAML brief from `.docx`/`.pdf`/`.md`/`.txt`; `/seo-outline` + `/seo-draft` consume it. Next up is Phase 4 (section-by-section drafting) — see [PLAN.md](PLAN.md).

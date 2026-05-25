@@ -9,7 +9,9 @@
       "Bash(jq:*)",
       "Bash(yq:*)",
       "Bash(ollama list)",
-      "Bash(ollama ps)"
+      "Bash(ollama ps)",
+      "Bash(pandoc:*)",
+      "Bash(pdftotext:*)"
     ]
   }
 }
