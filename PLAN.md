@@ -140,7 +140,7 @@ outputs/<brief-slug>/
 
 ## Phased MVP execution (per AGENTS.md)
 
-Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verification against live Ollama.
+Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verification against live Ollama. **Live execution state — what is done, in progress, or remaining — lives in [IMPLEMENT.md](IMPLEMENT.md), not here.** This section is the architectural breakdown; IMPLEMENT.md is the tracker.
 
 ### Phase 1 — Walking skeleton
 - Files: `scripts/ollama_call.sh`, `prompts/section.md`, `.claude/skills/seo-draft.md`, `.claude/settings.json`, `briefs/example.yaml`.

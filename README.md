@@ -92,6 +92,6 @@ The skill substitutes these into `prompts/section.md` placeholders (`{{BRIEF}}`,
 
 ## Working in this repo
 
-Read [AGENTS.md](AGENTS.md) before making changes. The short version: one phase at a time, ≤5 files per phase, walking-skeleton first, verify end-to-end against live Ollama, and end each phase with the literal handoff line.
+Read [AGENTS.md](AGENTS.md) before making changes. The 4-pillar docs are [AGENTS.md](AGENTS.md) (agent rules), [PLAN.md](PLAN.md) (architecture + phases), [IMPLEMENT.md](IMPLEMENT.md) (execution tracker — current state lives here), and this README (user/developer-facing). The short version: one phase at a time, ≤5 files per phase, walking-skeleton first, verify end-to-end against live Ollama, and end each phase with the literal handoff line.
 
 Current state: **Phase 3 (doc/PDF ingest) complete** — `/seo-ingest` produces a YAML brief from `.docx`/`.pdf`/`.md`/`.txt`; `/seo-outline` + `/seo-draft` consume it. Next up is Phase 4 (section-by-section drafting) — see [PLAN.md](PLAN.md).
