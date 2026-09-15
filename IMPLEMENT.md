@@ -1,8 +1,9 @@
 # IMPLEMENT.md
 
 ## Current state
-- Active phase: none (replanned plan awaiting approval, then Phase 3 runs first)
-- Last completed phase: 1 (not yet committed, Casey commits before Phase 3 starts)
+- Active phase: none (Phase 6 awaiting approval and the Phase 3 commit)
+- Last completed phase: 3 (Phase 1 committed in `7143421`, which also tracked `AGENTS.md` and `IMPLEMENT.md`)
+- Plan approved by Casey 2026-09-15, including the proposed `prompts/system.md` and the rewrite-model wording.
 - Run order: 3, 6, 7, 8, then 2, 4, 5. Phase 9 is deferred.
 
 ## Inherited decisions
@@ -35,7 +36,7 @@
 - Deferred out of this phase: all tutor plan fixes (Tutor-LLM repo).
 
 ### Phase 3: Restore `PLAN.md` to the Claude Code skills blueprint from commit `2518416`.
-- Status: planned (runs first)
+- Status: complete (2026-09-15)
 - Files to touch: `PLAN.md`
 - Functions to add or change: none
 - Reuse audit: `git log -- PLAN.md` shows `2518416` as the last skills-design version. Restoring it reuses that doc instead of writing a new one.
@@ -133,6 +134,7 @@
 - Functions to add or change: none
 - Reuse audit: `ls -a` shows no existing `.gitignore`. `grep -rn _smoke` finds only `.claude/settings.local.json` (a local allow entry).
 - Simplest approach considered: one `.gitignore` with four entries (`IMPLEMENT.md`, `outputs/`, `briefs/_ingest/`, `.claude/settings.local.json`). Adopted.
+- Discovered 2026-09-15: `IMPLEMENT.md` is already tracked (commit `7143421`), so the ignore rule alone will not untrack it. Casey runs `git rm --cached IMPLEMENT.md` as a handed command in this phase (tier 0 reserves git index writes to Casey). Verification of the `IMPLEMENT.md` ignore depends on it.
 - Scenarios: `IMPLEMENT.md` ignored. A new file under `outputs/` ignored. A file under `briefs/_ingest/` ignored. `briefs/example.yaml` and `.claude/settings.json` still tracked.
 - Verification:
   - `git check-ignore -v IMPLEMENT.md outputs/x/draft.md briefs/_ingest/x.txt .claude/settings.local.json` names a rule for each.
@@ -168,6 +170,12 @@
 - Scope: skill file layout (`.claude/skills/<name>/SKILL.md` vs flat files, and whether slash commands load), README quickstart duplicate step and placeholder list, restored `PLAN.md` phase tracking moved to match `AGENTS.md` (status belongs in `IMPLEMENT.md`).
 
 ## Phase reports
+
+### Phase 3 report
+- Changed: `PLAN.md` restored byte-identical from `2518416` via `git show 2518416:PLAN.md > PLAN.md`.
+- Tested: before, `git diff --stat 2518416 -- PLAN.md` showed 162 insertions and 149 deletions, and the `seo-app|prompts/seo` grep counted 5 hits. After, `git diff --exit-code 2518416 -- PLAN.md` exits 0 and the grep exits 1.
+- Docs: `IMPLEMENT.md` updated. It now shows in `git diff --stat` because `7143421` tracked it. Untracking it is part of Phase 2.
+- Deferred: runtime prose in the restored plan (Phase 8). Phase tracking still inside `PLAN.md` (Phase 9).
 
 ### Phase 1 report
 - Changed: `tutor-plan.md` removed from SEO-LLM by Casey. Tutor-LLM now holds `tutor-plan.md` and a copy of `AGENTS.md`.

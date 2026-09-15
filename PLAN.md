@@ -1,225 +1,212 @@
-# SEO Content App — Implementation Plan
+# PLAN.md
 
-A simplified, self-contained app built on the existing `SEO-LLM` prompt foundation. All models run locally via Ollama. All tailoring lives in app-layer markdown (never baked into Modelfiles). The app owns every constraint: banned words, tone levels, length bounds, and enforcement.
+# Local AI SEO Content CLI
 
-**Core workflow:** Tailor to a business → scan an SEO brief → extract keywords → generate small content using approved keywords → lint and deliver.
+## Overview
+
+A local-first SEO content pipeline driven by **Claude Code (CC) as the runtime orchestrator** and **Ollama** as the local model runtime. There is no standalone Python app. CC's skills, prompts, and the Bash tool sequence work; a single shell helper posts to Ollama's HTTP API.
+
+Primary models (custom Ollama tags built via `~/ai/build-qwen` and `~/ai/build-llama`):
+- `qwen-custom` — outlining, structured outputs, metadata, drafting
+- `llama-custom` — rewrite / humanization
+
+Single-model-active at a time to respect a low-VRAM budget (target: 12 GB). If these tags are missing from `ollama list`, build them via the scripts in `~/ai/` before running the pipeline.
 
 ---
 
-## Guiding principles (carried over from SEO-LLM)
+## Design principles
 
-1. **App-layer prompts only.** Base Ollama models stay project-agnostic. Every SEO rule, voice, and constraint ships as a markdown/config edit via git — no model rebuilds.
-2. **Durable vs. volatile split.** Stable rules (`seo-core.md`) are separated from Google-posture rules (`google-rules.md`) so volatile edits never touch durable files.
-3. **Constraints are data, not prose.** Banned words and tone levels live in structured YAML frontmatter so the app can both inject them into prompts *and* mechanically verify outputs.
-4. **Layers earn their way in.** No SERP scraping, retrieval, batching, or schema generation until a concrete pain point demands it.
+1. **Local-first.** All generation hits `localhost:11434`.
+2. **CC is the harness.** No custom CLI, workflow engine, or storage layer — skills + prompts + Bash + files.
+3. **Deterministic pipelines.** Stages run in order; no autonomous loops in MVP.
+4. **Section-based generation.** Long articles are never produced in a single call.
+5. **Multi-pass quality.** Draft → rewrite → SEO/metadata.
+6. **SEO-centric.** Prompts ground in intent, semantic coverage, EEAT.
 
 ---
 
-## Target structure
+## Architecture
 
 ```
-seo-app/
-├── app/
-│   ├── main.py            # Streamlit UI (Phase 7)
-│   ├── compiler.py        # stacks rules + profile + brief into final prompt
-│   ├── ollama_client.py   # Ollama calls; format=json for structured passes
-│   ├── brief_parser.py    # reads uploaded briefs (md / txt / docx)
-│   ├── tone.py            # slider value → instruction-sentence lookup
-│   └── lint.py            # banned-word grep, length checks, retry loop
-├── rules/
-│   ├── seo-core.md        # durable (merged system.md + formatting.md)
-│   └── google-rules.md    # volatile, reviewed on core updates
-├── profiles/
-│   └── <business>.md      # per-business: YAML frontmatter + voice prose
-├── briefs/                # uploaded briefs (input)
-├── outputs/               # generated content (output)
-├── tests/
-└── config.yaml            # model names, retry caps, defaults
+User in Claude Code
+  └─ /seo-generate briefs/<brief>.yaml
+       └─ skill reads brief + prompts/*.md
+            ├─ Bash: scripts/ollama_call.sh qwen-custom prompts/outline.md  → outline.md
+            ├─ Bash: per-section call (qwen-custom, prompts/section.md)     → sections/*.md
+            ├─ Bash: per-section rewrite (llama-custom, prompts/rewrite.md) → humanized
+            ├─ Bash: metadata + keywords pass (qwen-custom)                 → meta.json
+            └─ Write outputs/<slug>/final.md
+```
+
+No Python app. No workflow engine. No SQLite.
+
+---
+
+## Folder structure
+
+```
+seo-cli/
+├── .claude/
+│   ├── skills/              # /seo-draft, /seo-outline, /seo-rewrite, /seo-metadata, /seo-keywords, /seo-generate
+│   └── settings.json        # allow Bash(scripts/ollama_call.sh:*) and Bash(curl:*) to localhost
+├── prompts/
+│   ├── system/              # SEO standards, anti-generic rules, tone, EEAT
+│   ├── outline.md
+│   ├── section.md
+│   ├── intro.md
+│   ├── conclusion.md
+│   ├── rewrite.md
+│   ├── metadata.md
+│   └── keywords.md
+├── scripts/
+│   └── ollama_call.sh       # curl wrapper: model + prompt-file (+ optional temp/seed) → stdout
+├── briefs/                  # YAML inputs
+├── outputs/                 # <brief-slug>/{outline.md, sections/, final.md, meta.json}
+├── docs/
+│   └── google/              # helpful-content.md, eeat.md, semantic-search.md, ai-content-guidelines.md
+├── AGENTS.md
+└── PLAN.md
 ```
 
 ---
 
-## Phase 0 — Repo restructure & migration
+## Brief format (YAML)
 
-**Goal:** Convert the decision-record repo into the app skeleton without losing prompt work.
-
-**Tasks**
-- [ ] Create the directory structure above in a new branch (or new repo if kept separate from `~/ai/`).
-- [ ] Merge `prompts/seo/system.md` + `formatting.md` + `personality.md` → `rules/seo-core.md`. Strip anything business-specific into a profile template instead.
-- [ ] Move `prompts/seo/google-rules.md` → `rules/google-rules.md` unchanged. Extract its banned-word list into a machine-readable block (see Phase 3).
-- [ ] Archive the old README as `docs/decision-record.md` — it remains the "why we picked X" reference.
-- [ ] Write a new top-level `README.md` describing the app workflow in ≤1 page.
-- [ ] Add `config.yaml` with: model names (prose model, structured model), Ollama host/port, retry cap, default output types.
-
-**Deliverable:** Clean skeleton; rules migrated; old decisions preserved.
-**Done when:** `rules/` contains exactly two files and nothing references the old `prompts/seo/` paths.
-
----
-
-## Phase 1 — Prompt compiler (CLI-first, no UI)
-
-**Goal:** Prove the layered prompt stack produces a single, correct system prompt.
-
-**Tasks**
-- [ ] Build `compiler.py` with one function: `compile_prompt(profile_path, brief_text, keywords, task) -> str`.
-- [ ] Stacking order (durable → volatile → per-run):
-  1. `rules/seo-core.md`
-  2. `rules/google-rules.md`
-  3. Tone instructions (from profile frontmatter, translated by `tone.py`)
-  4. Profile voice prose (markdown body)
-  5. Brief summary + approved keywords + task instruction
-- [ ] Build `tone.py`: lookup table mapping each slider (formality, energy, technicality — each 1–5) to a concrete instruction sentence. Numbers are never sent raw to the model.
-- [ ] Add a `--dry-run` CLI flag that prints the compiled prompt for inspection.
-- [ ] Create one hardcoded test profile in `profiles/` with realistic frontmatter.
-
-**Deliverable:** `python -m app.compiler --profile profiles/test.md --dry-run` prints a sane, fully-stacked prompt.
-**Done when:** Reordering or editing any layer file changes the output with no code changes.
-
----
-
-## Phase 2 — Ollama client & structured keyword extraction
-
-**Goal:** Reliable local model calls, including guaranteed-JSON keyword output.
-
-**Tasks**
-- [ ] Build `ollama_client.py` wrapping `/api/chat`: prose mode and structured mode (`format` = JSON schema).
-- [ ] Define the keyword schema: `{primary: [str], secondary: [str], long_tail: [str], rationale: str}`.
-- [ ] Implement `extract_keywords(brief_text, profile) -> KeywordSet` using the structured model (granite-class), with the compiled prompt from Phase 1.
-- [ ] Handle failure modes: Ollama not running, model not pulled, malformed JSON (one automatic re-ask before surfacing an error).
-- [ ] CLI entry: `python -m app.keywords --brief briefs/example.md --profile profiles/test.md`.
-
-**Deliverable:** Brief in → clean keyword JSON out, every time.
-**Done when:** 10 consecutive runs against a sample brief return schema-valid JSON with zero manual parsing.
-
----
-
-## Phase 3 — Constraint engine (lint + retry loop)
-
-**Goal:** Mechanical enforcement of everything the app promises: banned words, tone, length.
-
-**Tasks**
-- [ ] Define the constraint schema in profile frontmatter:
-  ```yaml
-  banned_words: [delve, elevate, unlock, "in today's fast-paced world"]
-  tone: {formality: 3, energy: 2, technicality: 4}
-  length: {meta_description: [140, 160], intro: [80, 150]}
-  ```
-- [ ] Global banned words also live in `rules/google-rules.md` frontmatter; the lint merges global + profile lists.
-- [ ] Build `lint.py`:
-  - Banned-word/phrase check (case-insensitive, word-boundary regex).
-  - Length bounds per content type.
-  - Heading-hierarchy check for longer pieces (no skipped levels).
-  - Keyword-presence check (each approved primary keyword appears ≥1×, density ≤ configurable ceiling).
-- [ ] Build the retry loop: on failure, regenerate *only the failing piece* with the failure reason appended to the prompt. Hard cap at 3 attempts, then surface to the user with the specific violations listed.
-- [ ] Unit tests for every lint rule.
-
-**Deliverable:** `lint(content, profile) -> LintReport` plus a `generate_with_retries()` wrapper.
-**Done when:** A deliberately violating output is caught, regenerated, and passes — or fails loudly with a readable report after 3 tries.
-
----
-
-## Phase 4 — Business profile system
-
-**Goal:** Make "tailor to a business" a five-minute, repeatable step.
-
-**Tasks**
-- [ ] Design the profile template (`profiles/_template.md`): frontmatter (name, audience, region, banned_words, tone, length) + body sections (voice notes, positioning, credentials/anecdotes usable for E-E-A-T, topics to avoid).
-- [ ] Build a CLI wizard: `python -m app.profile new` — asks the questions, writes the file.
-- [ ] Add profile validation (required fields present, tone values in range, no empty voice body) — run on load, not just creation.
-- [ ] Support multiple profiles side by side; profile choice is a parameter everywhere downstream.
-
-**Deliverable:** Anyone can create a valid business profile via prompts in the terminal.
-**Done when:** Two different profiles produce visibly different tone/vocabulary from the same brief.
-
----
-
-## Phase 5 — Brief ingestion & keyword approval
-
-**Goal:** Accept real-world briefs and put a human checkpoint before generation.
-
-**Tasks**
-- [ ] Build `brief_parser.py`: accept `.md` and `.txt` first; add `.docx` (via python-docx) second. Normalize to plain text + light structure (title, sections).
-- [ ] Extract brief metadata when present (target keyword hints, word counts, audience notes) and pass to the compiler as context.
-- [ ] Keyword approval step: present extracted keywords grouped by tier; user approves/edits/prunes before anything is generated. CLI version first (numbered select), UI version in Phase 7.
-- [ ] Persist the approved keyword set alongside the brief in `briefs/<name>.keywords.json` so a run is reproducible.
-
-**Deliverable:** Brief file → parsed text → keyword proposal → approved set on disk.
-**Done when:** Re-running generation uses the saved approved set without re-extracting.
-
----
-
-## Phase 6 — Content generation pipeline
-
-**Goal:** End-to-end: approved keywords → linted small-content package.
-
-**Tasks**
-- [ ] Define the "small content" package (configurable per run):
-  - Meta title + meta description
-  - Intro paragraph
-  - 2–3 section blurbs (question-based headings per `seo-core.md`)
-  - Optional: social snippet
-- [ ] Each piece is a separate model call with its own length constraint — small local models do short pieces far better than one monolithic generation.
-- [ ] Route calls: prose model (llama-class) for body text, structured model for meta/title JSON. Allow a single-model config for simpler setups.
-- [ ] Wire every piece through `generate_with_retries()` (Phase 3).
-- [ ] Assemble the package into `outputs/<business>/<brief>/<date>.md` with a frontmatter header recording: profile used, rules versions (git hash), model names, keywords, lint results.
-- [ ] CLI: `python -m app.generate --brief ... --profile ...` runs the full pipeline.
-
-**Deliverable:** One command, full linted package on disk with provenance metadata.
-**Done when:** Output passes lint, uses approved keywords, and reads in the profile's voice on manual review.
-
----
-
-## Phase 7 — Streamlit UI
-
-**Goal:** The "easy to use app" layer. Thin wrapper — all logic already exists.
-
-**Tasks**
-- [ ] Page 1 — **Profiles:** list/create/edit profiles (form mirrors the CLI wizard; sliders for tone; tag input for banned words).
-- [ ] Page 2 — **Generate:** select profile → upload brief → view/approve keywords (checkboxes) → pick package pieces → generate with progress per piece → results view with lint badges.
-- [ ] Page 3 — **Outputs:** browse past runs, copy buttons per piece, download as .md.
-- [ ] Settings panel: Ollama host, model selection (auto-list from `ollama list`), retry cap.
-- [ ] Graceful states: Ollama offline banner, generation-in-progress spinners, lint-failure explanations in plain language.
-
-**Deliverable:** `streamlit run app/main.py` — the full workflow with zero terminal use.
-**Done when:** A non-technical user completes profile → brief → content without documentation.
-
----
-
-## Phase 8 — Hardening, packaging, docs
-
-**Goal:** Make it durable and shareable.
-
-**Tasks**
-- [ ] End-to-end test with 2 real briefs × 2 profiles; fix rough edges.
-- [ ] `requirements.txt` / `pyproject.toml`, pinned versions.
-- [ ] One-command setup script: checks Ollama, pulls configured models, creates dirs.
-- [ ] Docs: quickstart, profile-writing guide (with a good/bad frontmatter example), "updating google-rules.md" runbook tied to the RSS-notify habit from the decision record.
-- [ ] Optional: package as a single `seo-app` entry point (pipx-installable).
-
-**Done when:** A fresh machine goes from clone → generated content in under 15 minutes.
-
----
-
-## Phase 9 — Deferred layers (build only when pain appears)
-
-Not in scope now; listed so they're deliberate decisions later:
-
-- **Experiential-claim guard** — lint check that generated first-hand claims don't exceed what the profile/brief supplied (top candidate for first addition).
-- **Outcome log** — publish date + rules version + post-update traffic delta, closing the "survive the next core update" loop.
-- **SERP gap analysis** — scrape top-10, diff against generated content.
-- **Retrieval grounding** — inject source material to reduce fabrication on factual pieces.
-- **Batch mode** — CSV of briefs in, folder of packages out (only after lint loop is proven).
-- **Full-article generation** — extend "small content" to long-form using the same pipeline.
-
----
-
-## Phase order & dependencies
-
-```
-Phase 0 ──▶ Phase 1 ──▶ Phase 2 ──▶ Phase 3 ──▶ Phase 6 ──▶ Phase 7 ──▶ Phase 8
-                             │           │          ▲
-                             │       Phase 4 ───────┤   (profiles feed generation)
-                             └────── Phase 5 ───────┘   (briefs/keywords feed generation)
+```yaml
+topic: Local SEO for Dentists
+target_audience: Dental Clinics
+tone: Professional
+word_count: 2500
+keywords:
+  - dental seo
+  - local dental marketing
+  - dentist google rankings
+cta: Book a consultation
 ```
 
-Phases 4 and 5 can run in parallel after Phase 2. Everything before Phase 7 is CLI-verifiable, so quality is proven before any UI work begins.
+---
+
+## How CC calls Ollama
+
+A single shell helper:
+
+```bash
+scripts/ollama_call.sh <model> <prompt-file> [temperature] [seed]
+# posts {"model","prompt","stream":false,"options":{...}} to /api/generate
+# emits the response text to stdout
+```
+
+CC invokes it via the Bash tool. No Python wrapper, no client library.
+
+### Determinism knobs (defaults)
+
+| Stage     | model        | temperature | seed  | num_ctx |
+|-----------|--------------|-------------|-------|---------|
+| outline   | qwen-custom   | 0.3         | fixed | 8192    |
+| section   | qwen-custom   | 0.6         | fixed | 8192    |
+| rewrite   | llama-custom  | 0.8         | fixed | 8192    |
+| metadata  | qwen-custom   | 0.2         | fixed | 4096    |
+
+### Failure handling
+
+- If a per-section call fails (non-2xx or empty body), the skill retries once with a slightly higher temperature, then writes `sections/<n>.ERROR.md` and stops the pipeline. Resume is manual: re-running the skill skips sections that already have a non-error file.
+
+---
+
+## Output layout
+
+```
+outputs/<brief-slug>/
+├── outline.md
+├── sections/
+│   ├── 01-<heading-slug>.md
+│   └── ...
+├── humanized/
+│   └── 01-<heading-slug>.md
+├── final.md
+└── meta.json
+```
+
+---
+
+## Setup contract
+
+1. Install Ollama and run `ollama serve`.
+2. Build custom models: `~/ai/build-qwen` and `~/ai/build-llama` (produces `qwen-custom` and `llama-custom` Ollama tags).
+3. Verify: `curl -s http://localhost:11434/api/tags | jq '.models[].name'`
+4. Open this repo in Claude Code; run `/seo-draft briefs/example.yaml`.
+
+---
+
+## Phased MVP execution (per AGENTS.md)
+
+Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verification against live Ollama. **Live execution state — what is done, in progress, or remaining — lives in [IMPLEMENT.md](IMPLEMENT.md), not here.** This section is the architectural breakdown; IMPLEMENT.md is the tracker.
+
+### Phase 1 — Walking skeleton
+- Files: `scripts/ollama_call.sh`, `prompts/section.md`, `.claude/skills/seo-draft.md`, `.claude/settings.json`, `briefs/example.yaml`.
+- Goal: `/seo-draft briefs/example.yaml` produces `outputs/<slug>/draft.md` via a single Qwen call.
+
+### Phase 2 — Outline stage
+- Files: `prompts/outline.md`, `.claude/skills/seo-outline.md`, update `seo-draft` to consume the outline.
+- Goal: outline generated first and saved as `outline.md`; draft follows it.
+
+### Phase 3 — Brief ingest from .docx / .pdf / .md / .txt
+- Files: `prompts/ingest.md`, `.claude/skills/seo-ingest.md`, `.claude/settings.json` (allow `pandoc` + `pdftotext`), `PLAN.md`, `README.md`.
+- Goal: `/seo-ingest <file>` extracts text (pandoc for .docx, pdftotext for .pdf, passthrough for .md/.txt) and emits `briefs/<slug>.yaml` matching the brief schema for the user to review before running `/seo-outline`.
+
+### Phase 4 — Section-by-section drafting
+- Files: update `seo-draft` to loop sections; `prompts/intro.md`, `prompts/conclusion.md`.
+- Goal: each outline section → its own Ollama call, stitched into `final.md`.
+
+### Phase 5 — Humanization rewrite (Llama)
+- Files: `prompts/rewrite.md`, `.claude/skills/seo-rewrite.md`, helper supports model swap.
+- Goal: post-draft rewrite pass with `llama-custom` reduces repetition.
+
+### Phase 6 — Metadata + keywords
+- Files: `prompts/metadata.md`, `prompts/keywords.md`, `.claude/skills/seo-metadata.md`, `.claude/skills/seo-keywords.md`.
+- Goal: title, description, slug, FAQ, keyword expansion written to `meta.json`.
+
+### Phase 7 — Docs + SEO knowledge base
+- Files: `README.md`, `docs/google/{helpful-content,eeat,semantic-search,ai-content-guidelines}.md`, link from system prompt.
+- Goal: prompts ground in EEAT / helpful-content guidance; quickstart documented.
+
+Deferred (post-MVP): SERP extraction, competitor analysis, RAG, autonomous research, internal linking, topical authority — Milestones 4–5 in the old plan.
+
+---
+
+## Verification
+
+After each phase:
+1. `ollama serve` running; `ollama list` includes `qwen-custom` and `llama-custom`.
+2. Run the latest skill in CC against `briefs/example.yaml`.
+3. Inspect `outputs/<slug>/` for the artifacts that phase promised.
+4. Spot-check generated text for SEO structure (H2s, keyword presence, no robotic intros).
+
+No test framework in MVP — generation is the test.
+
+---
+
+## Reuse audit
+
+Project contains `AGENTS.md`, `PLAN.md`, and Phase-1-shaped stubs (`briefs/example.yaml`, `prompts/section.md`, `scripts/ollama_call.sh`). External reuse:
+- **Ollama** — call its HTTP API directly; don't wrap.
+- **Claude Code skills + Bash** — don't build a workflow engine.
+- **YAML** — `yq` if needed, otherwise let CC parse inline.
+
+---
+
+## Risks
+
+1. **Repetitive outputs** → multi-pass rewrite, prompt variation, section drafting.
+2. **Hallucinated SEO claims** → ground prompts in `docs/google/*` (Phase 6); deterministic temps for metadata.
+3. **Over-engineering** → no workflow engine, no DB; skills + files only.
+4. **Ollama instability** → single retry then halt with `.ERROR.md` marker; manual resume.
+
+---
+
+## Success criteria
+
+MVP succeeds when a user can, on a 12 GB GPU box with Ollama running:
+1. Drop a YAML brief into `briefs/`.
+2. Run `/seo-generate` in CC.
+3. Get a section-by-section, humanized, metadata-tagged markdown article in `outputs/<slug>/final.md`.
