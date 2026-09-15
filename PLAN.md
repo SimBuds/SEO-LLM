@@ -4,19 +4,21 @@
 
 ## Overview
 
-A local-first SEO content pipeline driven by **Claude Code (CC) as the runtime orchestrator** and **Ollama** as the local model runtime. There is no standalone Python app. CC's skills, prompts, and the Bash tool sequence work; a single shell helper posts to Ollama's HTTP API.
+A local-first SEO content pipeline driven by **Claude Code (CC) as the runtime orchestrator** and a **llama.cpp router** as the local model runtime. There is no standalone Python app. CC's skills, prompts, and the Bash tool sequence the work, and a single shell helper posts to the router's OpenAI-compatible HTTP API.
 
-Primary models (custom Ollama tags built via `~/ai/build-qwen` and `~/ai/build-llama`):
-- `qwen-custom` — outlining, structured outputs, metadata, drafting
-- `llama-custom` — rewrite / humanization
+Models are served by the llama.cpp router on `localhost:8080`, which runs as the `llama-server` systemd user service. Its presets (`gemma`, `qwen`, `lite`) are built and deployed from `~/Apps/Local-LLM`, and this repo only consumes them:
+- `qwen`: outlining, structured outputs, metadata, drafting
+- Rewrite / humanization: model chosen when that phase is planned
 
-Single-model-active at a time to respect a low-VRAM budget (target: 12 GB). If these tags are missing from `ollama list`, build them via the scripts in `~/ai/` before running the pipeline.
+The router keeps one model loaded at a time (`--models-max 1`) to respect a low-VRAM budget (currently a 10 GB RTX 3080, with `qwen`'s MoE layers offloaded to system RAM). If `curl -s localhost:8080/models` does not list `qwen`, fix the router in Local-LLM before running the pipeline.
+
+Router models carry no built-in system prompt. The wrapper sends `prompts/system.md` as the system message on every call (decided 2026-09-15, after the move off the previous runtime removed the model-side prompt).
 
 ---
 
 ## Design principles
 
-1. **Local-first.** All generation hits `localhost:11434`.
+1. **Local-first.** All generation hits `localhost:8080`.
 2. **CC is the harness.** No custom CLI, workflow engine, or storage layer — skills + prompts + Bash + files.
 3. **Deterministic pipelines.** Stages run in order; no autonomous loops in MVP.
 4. **Section-based generation.** Long articles are never produced in a single call.
@@ -31,10 +33,10 @@ Single-model-active at a time to respect a low-VRAM budget (target: 12 GB). If t
 User in Claude Code
   └─ /seo-generate briefs/<brief>.yaml
        └─ skill reads brief + prompts/*.md
-            ├─ Bash: scripts/ollama_call.sh qwen-custom prompts/outline.md  → outline.md
-            ├─ Bash: per-section call (qwen-custom, prompts/section.md)     → sections/*.md
-            ├─ Bash: per-section rewrite (llama-custom, prompts/rewrite.md) → humanized
-            ├─ Bash: metadata + keywords pass (qwen-custom)                 → meta.json
+            ├─ Bash: scripts/llm_call.sh prompts/outline.md                  → outline.md
+            ├─ Bash: per-section call (qwen, prompts/section.md)            → sections/*.md
+            ├─ Bash: per-section rewrite (model TBD, prompts/rewrite.md)    → humanized
+            ├─ Bash: metadata + keywords pass (qwen)                        → meta.json
             └─ Write outputs/<slug>/final.md
 ```
 
@@ -48,8 +50,9 @@ No Python app. No workflow engine. No SQLite.
 seo-cli/
 ├── .claude/
 │   ├── skills/              # /seo-draft, /seo-outline, /seo-rewrite, /seo-metadata, /seo-keywords, /seo-generate
-│   └── settings.json        # allow Bash(scripts/ollama_call.sh:*) and Bash(curl:*) to localhost
+│   └── settings.json        # allow Bash(scripts/llm_call.sh:*) and Bash(curl -s localhost:8080/models)
 ├── prompts/
+│   ├── system.md            # system message sent on every model call
 │   ├── system/              # SEO standards, anti-generic rules, tone, EEAT
 │   ├── outline.md
 │   ├── section.md
@@ -59,7 +62,7 @@ seo-cli/
 │   ├── metadata.md
 │   └── keywords.md
 ├── scripts/
-│   └── ollama_call.sh       # curl wrapper: model + prompt-file (+ optional temp/seed) → stdout
+│   └── llm_call.sh          # curl wrapper: prompt-file (+ optional temp/seed) + prompts/system.md → stdout
 ├── briefs/                  # YAML inputs
 ├── outputs/                 # <brief-slug>/{outline.md, sections/, final.md, meta.json}
 ├── docs/
@@ -86,26 +89,30 @@ cta: Book a consultation
 
 ---
 
-## How CC calls Ollama
+## How CC calls the model
 
 A single shell helper:
 
 ```bash
-scripts/ollama_call.sh <model> <prompt-file> [temperature] [seed]
-# posts {"model","prompt","stream":false,"options":{...}} to /api/generate
-# emits the response text to stdout
+scripts/llm_call.sh <prompt-file> [temperature] [seed]
+# posts {"model","messages":[system, user],"stream":false, sampling,
+#        "chat_template_kwargs":{"enable_thinking":false}} to /v1/chat/completions
+# system = prompts/system.md, user = <prompt-file>
+# emits .choices[0].message.content to stdout; LLM_HOST / LLM_MODEL override the target
 ```
 
 CC invokes it via the Bash tool. No Python wrapper, no client library.
 
 ### Determinism knobs (defaults)
 
-| Stage     | model        | temperature | seed  | num_ctx |
-|-----------|--------------|-------------|-------|---------|
-| outline   | qwen-custom   | 0.3         | fixed | 8192    |
-| section   | qwen-custom   | 0.6         | fixed | 8192    |
-| rewrite   | llama-custom  | 0.8         | fixed | 8192    |
-| metadata  | qwen-custom   | 0.2         | fixed | 4096    |
+| Stage     | model      | temperature | seed  |
+|-----------|------------|-------------|-------|
+| outline   | qwen       | 0.3         | fixed |
+| section   | qwen       | 0.6         | fixed |
+| rewrite   | TBD        | 0.8         | fixed |
+| metadata  | qwen       | 0.2         | fixed |
+
+Context is not a per-stage knob. The router's preset fixes it at 32768 tokens, and a prompt over that returns HTTP 400 instead of being truncated. The other sampling values (`top_p`, `top_k`, `min_p`, `presence_penalty`, `repeat_penalty`) are pinned in `scripts/llm_call.sh` and sent on every call, so behavior is defined in this repo rather than by the router's defaults.
 
 ### Failure handling
 
@@ -131,19 +138,19 @@ outputs/<brief-slug>/
 
 ## Setup contract
 
-1. Install Ollama and run `ollama serve`.
-2. Build custom models: `~/ai/build-qwen` and `~/ai/build-llama` (produces `qwen-custom` and `llama-custom` Ollama tags).
-3. Verify: `curl -s http://localhost:11434/api/tags | jq '.models[].name'`
+1. The `llama-server` user service is running (`systemctl --user is-active llama-server` prints `active`). It is installed and configured from `~/Apps/Local-LLM`.
+2. The `qwen` preset is deployed there (`make deploy` in Local-LLM, then a service restart, both run by the owner of that repo).
+3. Verify: `curl -s localhost:8080/models | jq -er '.data[] | select(.id=="qwen") | .id'` prints `qwen`.
 4. Open this repo in Claude Code; run `/seo-draft briefs/example.yaml`.
 
 ---
 
 ## Phased MVP execution (per AGENTS.md)
 
-Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verification against live Ollama. **Live execution state — what is done, in progress, or remaining — lives in [IMPLEMENT.md](IMPLEMENT.md), not here.** This section is the architectural breakdown; IMPLEMENT.md is the tracker.
+Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verification against the live llama.cpp router. **Live execution state — what is done, in progress, or remaining — lives in [IMPLEMENT.md](IMPLEMENT.md), not here.** This section is the architectural breakdown; IMPLEMENT.md is the tracker.
 
 ### Phase 1 — Walking skeleton
-- Files: `scripts/ollama_call.sh`, `prompts/section.md`, `.claude/skills/seo-draft.md`, `.claude/settings.json`, `briefs/example.yaml`.
+- Files: `scripts/llm_call.sh` (the wrapper, replaced for the llama.cpp router on 2026-09-15), `prompts/section.md`, `.claude/skills/seo-draft.md`, `.claude/settings.json`, `briefs/example.yaml`.
 - Goal: `/seo-draft briefs/example.yaml` produces `outputs/<slug>/draft.md` via a single Qwen call.
 
 ### Phase 2 — Outline stage
@@ -156,11 +163,11 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 
 ### Phase 4 — Section-by-section drafting
 - Files: update `seo-draft` to loop sections; `prompts/intro.md`, `prompts/conclusion.md`.
-- Goal: each outline section → its own Ollama call, stitched into `final.md`.
+- Goal: each outline section → its own model call, stitched into `final.md`.
 
-### Phase 5 — Humanization rewrite (Llama)
-- Files: `prompts/rewrite.md`, `.claude/skills/seo-rewrite.md`, helper supports model swap.
-- Goal: post-draft rewrite pass with `llama-custom` reduces repetition.
+### Phase 5 — Humanization rewrite
+- Files: `prompts/rewrite.md`, `.claude/skills/seo-rewrite.md`. The wrapper already swaps models through `LLM_MODEL`.
+- Goal: a post-draft rewrite pass reduces repetition. Its model is chosen from the router's presets when this phase is planned.
 
 ### Phase 6 — Metadata + keywords
 - Files: `prompts/metadata.md`, `prompts/keywords.md`, `.claude/skills/seo-metadata.md`, `.claude/skills/seo-keywords.md`.
@@ -177,7 +184,7 @@ Deferred (post-MVP): SERP extraction, competitor analysis, RAG, autonomous resea
 ## Verification
 
 After each phase:
-1. `ollama serve` running; `ollama list` includes `qwen-custom` and `llama-custom`.
+1. The router serves `qwen`: `curl -s localhost:8080/models | jq -er '.data[] | select(.id=="qwen") | .id'` prints `qwen`.
 2. Run the latest skill in CC against `briefs/example.yaml`.
 3. Inspect `outputs/<slug>/` for the artifacts that phase promised.
 4. Spot-check generated text for SEO structure (H2s, keyword presence, no robotic intros).
@@ -188,8 +195,8 @@ No test framework in MVP — generation is the test.
 
 ## Reuse audit
 
-Project contains `AGENTS.md`, `PLAN.md`, and Phase-1-shaped stubs (`briefs/example.yaml`, `prompts/section.md`, `scripts/ollama_call.sh`). External reuse:
-- **Ollama** — call its HTTP API directly; don't wrap.
+Project contains `AGENTS.md`, `PLAN.md`, and Phase-1-shaped stubs (`briefs/example.yaml`, `prompts/section.md`, `scripts/llm_call.sh`). External reuse:
+- **llama.cpp router**: call its OpenAI-compatible HTTP API directly through `scripts/llm_call.sh`, with no client library.
 - **Claude Code skills + Bash** — don't build a workflow engine.
 - **YAML** — `yq` if needed, otherwise let CC parse inline.
 
@@ -200,13 +207,13 @@ Project contains `AGENTS.md`, `PLAN.md`, and Phase-1-shaped stubs (`briefs/examp
 1. **Repetitive outputs** → multi-pass rewrite, prompt variation, section drafting.
 2. **Hallucinated SEO claims** → ground prompts in `docs/google/*` (Phase 6); deterministic temps for metadata.
 3. **Over-engineering** → no workflow engine, no DB; skills + files only.
-4. **Ollama instability** → single retry then halt with `.ERROR.md` marker; manual resume.
+4. **Router instability or model swaps** → single retry, then halt with an `.ERROR.md` marker and resume by hand. Another app using a different preset unloads `qwen`, so the next call pays its load time.
 
 ---
 
 ## Success criteria
 
-MVP succeeds when a user can, on a 12 GB GPU box with Ollama running:
+MVP succeeds when a user can, on a local GPU box with the llama.cpp router serving `qwen`:
 1. Drop a YAML brief into `briefs/`.
 2. Run `/seo-generate` in CC.
 3. Get a section-by-section, humanized, metadata-tagged markdown article in `outputs/<slug>/final.md`.
