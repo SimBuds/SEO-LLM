@@ -1,11 +1,11 @@
 ---
 name: seo-outline
-description: Generate an SEO article outline (H1 + H2/H3 + intent notes + FAQ) from a YAML brief using a local Ollama model. Phase 2 stage — outline only, no drafting. Use when the user runs /seo-outline <brief.yaml> or asks for an article outline from a brief.
+description: Generate an SEO article outline (H1 + H2/H3 + intent notes + FAQ) from a YAML brief using the local llama.cpp router (model `qwen`). Phase 2 stage — outline only, no drafting. Use when the user runs /seo-outline <brief.yaml> or asks for an article outline from a brief.
 ---
 
 # seo-outline
 
-Generate a structured article outline from a YAML brief via Ollama. The outline is consumed by `/seo-draft` in the next stage.
+Generate a structured article outline from a YAML brief via the llama.cpp router. The outline is consumed by `/seo-draft` in the next stage.
 
 ## Inputs
 
@@ -13,8 +13,7 @@ Generate a structured article outline from a YAML brief via Ollama. The outline 
 
 ## Preconditions
 
-1. Ollama daemon reachable: `curl -sS http://localhost:11434/api/tags | jq '.models | length'` returns ≥ 1.
-2. `qwen-custom` is present in `ollama list`. If missing, tell the user to run `~/ai/build-qwen` and stop.
+1. The llama.cpp router serves `qwen`: `curl -s localhost:8080/models | jq -er '.data[] | select(.id=="qwen") | .id'` prints `qwen`. If it prints nothing or exits non-zero, tell the user the router on `localhost:8080` is not serving `qwen` and stop.
 
 ## Steps
 
@@ -28,7 +27,7 @@ Generate a structured article outline from a YAML brief via Ollama. The outline 
    - `{{KEYWORDS}}` → comma-joined keywords
    - `{{CTA}}` → `cta`
 4. Write the filled prompt to `outputs/<slug>/_outline_prompt.txt`.
-5. Run: `bash scripts/ollama_call.sh qwen-custom outputs/<slug>/_outline_prompt.txt 0.3 1`
+5. Run: `bash scripts/llm_call.sh outputs/<slug>/_outline_prompt.txt 0.3 1`
 6. Save stdout to `outputs/<slug>/outline.md`.
 7. Report: model used, output path, count of H2 sections, whether `## FAQ` and `## Conclusion` are present.
 

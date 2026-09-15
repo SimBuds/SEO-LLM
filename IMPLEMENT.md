@@ -1,8 +1,8 @@
 # IMPLEMENT.md
 
 ## Current state
-- Active phase: none (Phase 7 awaiting approval and the Phase 6 commit)
-- Last completed phase: 6 (Phase 3 committed in `a33329d`. Phase 1 committed in `7143421`, which also tracked `AGENTS.md` and `IMPLEMENT.md`)
+- Active phase: 7 (in progress, paused at a decision gate on 2026-09-15, see "Phase 7 findings" under the phase)
+- Last completed phase: 6 (committed in `4b4b9af`. Phase 3 committed in `a33329d`. Phase 1 committed in `7143421`, which also tracked `AGENTS.md` and `IMPLEMENT.md`)
 - Plan approved by Casey 2026-09-15, including the proposed `prompts/system.md` and the rewrite-model wording.
 - Run order: 3, 6, 7, 8, then 2, 4, 5. Phase 9 is deferred.
 
@@ -98,8 +98,17 @@
 - Deferred out of this phase: skills still call the old wrapper until Phase 7.
 
 ### Phase 7: Point the three skills at `scripts/llm_call.sh` and the router check, and delete the old wrapper.
-- Status: planned
-- Files to touch: `.claude/skills/seo-ingest.md`, `.claude/skills/seo-outline.md`, `.claude/skills/seo-draft.md`, old wrapper in `scripts/` (delete)
+- Status: in progress (paused for Casey's decisions below)
+- Phase 7 findings (2026-09-15):
+  - Done so far: all three skills edited (preconditions, run step, "via" wording, draft failure wording), old wrapper deleted. Reuse audit missed the `description:` line 3 in each skill, which also named the old runtime. Same files, edited in place. The check uses `jq -er` (not `-e`) so it prints `qwen` without JSON quotes.
+  - Passed: precondition prints `qwen` (exit 0). A nonexistent id exits 4. Outline via the new wrapper: 52 s, H1 present, 8 H2s, `## FAQ` and `## Conclusion` present. Draft: 84 s, 3015 words, H2s match the outline, no fences, no thinking text, no `_Intent:` leakage. Draft call tokens: system 225, prompt 1791, output 3747 (about 5.8k of the 32768 context).
+  - Failed: ingest. The model wrote `target_audone:` instead of `target_audience:`. Step 9's key check catches it.
+  - Diagnosis (one variable per run, bakery `.md` source): `repeat_penalty` 1.0 vs 1.05 made no difference. With `prompts/system.md`: misspelled at temp 0 and in 3 of 4 seeded runs at temp 0.2. Without a system message: correct at temp 0 and in 3 of 3 seeded runs. A scratch variant of `prompts/system.md` with one added Output bullet, "Copy key names, field names, and headings character for character as the task writes them.", was correct at temp 0 and in 4 of 4 seeded runs. The approved system text is the trigger, and the one-line addition fixes it in every run tried.
+  - Environment: `yq` is not installed, so ingest step 9 as written cannot run (exit 127). `pandoc` is not installed, so `.docx` ingest cannot run. Both predate this migration. Verification used PyYAML 6.0.3 in a scratch harness as a stand-in parser.
+  - Quality note, not a migration defect: the draft contained one Chinese token (`试戴`, "try-on") mid-sentence.
+  - Cleanup: generated `outputs/<slug>/`, `briefs/_ingest/`, and the bakery brief removed from the repo. Scratch harness files stay in the session scratchpad.
+  - Decided by Casey 2026-09-15: (1) add the exact-copy bullet to `prompts/system.md`. This expands Phase 7's surface by that one file, approved. Outline, draft, and ingest are re-run after the change. (2) Casey installs `yq` himself. Ingest step 9 stays as written and is re-run with `yq` once it is present.
+- Files to touch: `.claude/skills/seo-ingest.md`, `.claude/skills/seo-outline.md`, `.claude/skills/seo-draft.md`, old wrapper in `scripts/` (delete), `prompts/system.md` (one bullet, surface expansion approved 2026-09-15)
 - Functions to add or change: none (skill steps only)
 - Reuse audit: case-insensitive grep lists the lines to change. Preconditions at lines 16 to 17 in each skill. Run step at `seo-ingest.md:31`, `seo-outline.md:31`, `seo-draft.md:34`. "via Ollama" wording at `seo-outline.md:8`, `seo-draft.md:8`. Failure wording at `seo-draft.md:40`. `seo-draft.md:17` names the old model and build script.
 - Simplest approach considered: replace the two precondition lines with one check, `curl -s localhost:8080/models | jq -e '.data[] | select(.id=="qwen") | .id'`, which must print `qwen`. If it does not, the skill tells the user the llama.cpp router is not serving `qwen` and stops. Swap the run command to `bash scripts/llm_call.sh <prompt-file> <temp> <seed>` with each skill's existing temperature and seed. Adopted.
