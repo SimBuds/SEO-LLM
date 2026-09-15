@@ -1,8 +1,8 @@
 # IMPLEMENT.md
 
 ## Current state
-- Active phase: none (Phase 6 awaiting approval and the Phase 3 commit)
-- Last completed phase: 3 (Phase 1 committed in `7143421`, which also tracked `AGENTS.md` and `IMPLEMENT.md`)
+- Active phase: none (Phase 7 awaiting approval and the Phase 6 commit)
+- Last completed phase: 6 (Phase 3 committed in `a33329d`. Phase 1 committed in `7143421`, which also tracked `AGENTS.md` and `IMPLEMENT.md`)
 - Plan approved by Casey 2026-09-15, including the proposed `prompts/system.md` and the rewrite-model wording.
 - Run order: 3, 6, 7, 8, then 2, 4, 5. Phase 9 is deferred.
 
@@ -48,7 +48,7 @@
 - Deferred out of this phase: model runtime prose (Phase 8). Phase tracking still living in `PLAN.md` (Phase 9).
 
 ### Phase 6: Add `scripts/llm_call.sh`, which sends `prompts/system.md` plus a prompt file to the llama.cpp router.
-- Status: planned
+- Status: complete (2026-09-15)
 - Files to touch: `scripts/llm_call.sh` (new), `prompts/system.md` (new), `.claude/settings.json`, `.claude/settings.local.json`
 - Functions to add or change: the wrapper script (one public interface: its command line)
 - Reuse audit:
@@ -170,6 +170,19 @@
 - Scope: skill file layout (`.claude/skills/<name>/SKILL.md` vs flat files, and whether slash commands load), README quickstart duplicate step and placeholder list, restored `PLAN.md` phase tracking moved to match `AGENTS.md` (status belongs in `IMPLEMENT.md`).
 
 ## Phase reports
+
+### Phase 6 report
+- Changed: `scripts/llm_call.sh` (new, 54 lines, mode 755 like the old wrapper), `prompts/system.md` (new, 17 lines, the approved text verbatim), `.claude/settings.json` (old wrapper, old port, and old CLI entries replaced by the new wrapper and `curl -s localhost:8080/models`), `.claude/settings.local.json` (smoke entry now calls the new wrapper). `settings.local.json` is ignored by `~/.config/git/ignore`, so it does not show in `git status`.
+- Bug found and fixed in-phase: on HTTP error, `set -e` exited at the `RESPONSE=$(curl ...)` capture, so the server's error body was never printed (only `curl: (22) ... 400`). The old wrapper had the same defect. Fix: `|| { rc=$?; echo "$RESPONSE" >&2; exit "$rc"; }`. Observed failing first, then passing (S6 below).
+- Tested (live router, observed):
+  - Fail-first: before the change, `bash scripts/llm_call.sh` exited 127 (no such file).
+  - S1 defaults (prompt file only): exit 0, one-sentence reply, no thinking text. 10.7 s including the `qwen` load.
+  - S2 role check: with the wrapper, "help you write and structure SEO content according to specific tasks and briefs". Control call without a system message: "provide helpful, accurate, and safe information across a wide range of topics". The system message is being sent. The control response's `message` keys were only `content` and `role` (no `reasoning_content`), so thinking is off.
+  - S3 no args: exit 1, "prompt file required". S4 unreadable prompt: exit 2 with the path. S5 missing `prompts/system.md`: exit 2 with the path, file restored.
+  - S6 `LLM_MODEL=nonexistent`: before the fix exit 22 with no body. After the fix exit 22 and `{"error":{"code":400,"message":"model 'nonexistent' not found",...}}` on stderr.
+  - Settings: both files parse with `jq`. The `11434|ollama` grep over them exits 1. `curl -s localhost:8080/models | jq -e ...` finds `qwen` (status `loaded`).
+- Docs: `IMPLEMENT.md` updated. README and PLAN prose are Phase 8.
+- Deferred: skills still call the old wrapper until Phase 7.
 
 ### Phase 3 report
 - Changed: `PLAN.md` restored byte-identical from `2518416` via `git show 2518416:PLAN.md > PLAN.md`.
