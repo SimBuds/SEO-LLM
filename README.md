@@ -48,7 +48,7 @@ SEO-LLM/
 
 - **llama.cpp router** on `http://localhost:8080` serving the model `qwen`. It runs as the `llama-server` systemd user service, configured and deployed from `~/Apps/Local-LLM` (see that repo's README, "Serving other apps"). This repo only calls it.
   - The router keeps one model loaded at a time and puts it to sleep after 10 idle minutes, so the first call after another model was in use waits for `qwen` to load.
-  - Context is fixed at 32768 tokens by the router's preset. The wrapper reads the served value before every call and refuses to run below 32768 (see below). A longer prompt returns HTTP 400 instead of being truncated.
+  - Context is fixed per model by the router's preset, not per request, and the presets live in Local-LLM, so the number can change under this repo. Read the current value with `curl -s localhost:8080/models | jq -r '.data[] | "\(.id): " + (.status.args | index("--ctx-size") as $i | .[$i+1])'`. The wrapper requires at least 32768 and refuses to run below that (see below). A prompt longer than the served context returns HTTP 400 instead of being truncated.
   - Optional: the `llm` CLI from Local-LLM shows model state (`llm status`) and preloads a model (`llm load qwen`).
 - **`jq`** and **`curl`** on `PATH` (the wrapper uses them).
 - **`pandoc`** (for `.docx` ingest) and **`pdftotext`** from `poppler-utils` (for `.pdf` ingest). Only needed if you use `/seo-ingest`.

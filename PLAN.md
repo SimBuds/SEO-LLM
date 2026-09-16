@@ -47,9 +47,9 @@ No Python app. No workflow engine. No SQLite.
 ## Folder structure
 
 ```
-seo-cli/
+SEO-LLM/
 ├── .claude/
-│   ├── skills/              # /seo-draft, /seo-outline, /seo-rewrite, /seo-metadata, /seo-keywords, /seo-generate
+│   ├── skills/              # <name>/SKILL.md per command. Built: /seo-ingest, /seo-outline, /seo-draft. Planned: /seo-rewrite, /seo-metadata, /seo-keywords, /seo-generate
 │   └── settings.json        # allow Bash(scripts/llm_call.sh:*) and Bash(curl -s localhost:8080/models)
 ├── prompts/
 │   ├── system.md            # system message sent on every model call
@@ -108,12 +108,14 @@ CC invokes it via the Bash tool. No Python wrapper, no client library.
 
 | Stage     | model      | temperature | seed  |
 |-----------|------------|-------------|-------|
+| ingest    | qwen       | 0.2         | fixed |
 | outline   | qwen       | 0.3         | fixed |
+| draft     | qwen       | 0.7         | fixed |
 | section   | qwen       | 0.6         | fixed |
 | rewrite   | TBD        | 0.8         | fixed |
 | metadata  | qwen       | 0.2         | fixed |
 
-Context is not a per-stage knob. The router's preset fixes it at 32768 tokens, and a prompt over that returns HTTP 400 instead of being truncated. `scripts/llm_call.sh` reads the served value from `/models` before each call and aborts if it is below 32768 or cannot be read, so a shrunken preset fails loudly instead of silently cutting the budget. The other sampling values (`top_p`, `top_k`, `min_p`, `presence_penalty`, `repeat_penalty`) are pinned in `scripts/llm_call.sh` and sent on every call, so behavior is defined in this repo rather than by the router's defaults.
+Context is not a per-stage knob. Each router preset fixes it per model (65536 for all three presets since the 2026-09-16 redeploy), and a prompt over it returns HTTP 400 instead of being truncated. `scripts/llm_call.sh` reads the served value from `/models` before each call and aborts if it is below this repo's 32768 minimum or cannot be read, so a shrunken preset fails loudly instead of silently cutting the budget. The other sampling values (`top_p`, `top_k`, `min_p`, `presence_penalty`, `repeat_penalty`) are pinned in `scripts/llm_call.sh` and sent on every call, so behavior is defined in this repo rather than by the router's defaults.
 
 ### Failure handling
 
@@ -148,18 +150,18 @@ outputs/<brief-slug>/
 
 ## Phased MVP execution (per AGENTS.md)
 
-Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verification against the live llama.cpp router. **Live execution state — what is done, in progress, or remaining — lives in [IMPLEMENT.md](IMPLEMENT.md), not here.** This section is the architectural breakdown; IMPLEMENT.md is the tracker.
+Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verification against the live llama.cpp router. **Live execution state — what is done, in progress, or remaining — lives in `IMPLEMENT.md` (untracked, see README), not here.** This section is the architectural breakdown; IMPLEMENT.md is the tracker.
 
 ### Phase 1 — Walking skeleton
-- Files: `scripts/llm_call.sh` (the wrapper, replaced for the llama.cpp router on 2026-09-15), `prompts/section.md`, `.claude/skills/seo-draft.md`, `.claude/settings.json`, `briefs/example.json`.
+- Files: `scripts/llm_call.sh` (the wrapper, replaced for the llama.cpp router on 2026-09-15), `prompts/section.md`, `.claude/skills/seo-draft/SKILL.md`, `.claude/settings.json`, `briefs/example.json`.
 - Goal: `/seo-draft briefs/example.json` produces `outputs/<slug>/draft.md` via a single Qwen call.
 
 ### Phase 2 — Outline stage
-- Files: `prompts/outline.md`, `.claude/skills/seo-outline.md`, update `seo-draft` to consume the outline.
+- Files: `prompts/outline.md`, `.claude/skills/seo-outline/SKILL.md`, update `seo-draft` to consume the outline.
 - Goal: outline generated first and saved as `outline.md`; draft follows it.
 
 ### Phase 3 — Brief ingest from .docx / .pdf / .md / .txt
-- Files: `prompts/ingest.md`, `.claude/skills/seo-ingest.md`, `.claude/settings.json` (allow `pandoc` + `pdftotext`), `PLAN.md`, `README.md`.
+- Files: `prompts/ingest.md`, `.claude/skills/seo-ingest/SKILL.md`, `.claude/settings.json` (allow `pandoc` + `pdftotext`), `PLAN.md`, `README.md`.
 - Goal: `/seo-ingest <file>` extracts text (pandoc for .docx, pdftotext for .pdf, passthrough for .md/.txt) and emits `briefs/<slug>.json` matching the brief schema for the user to review before running `/seo-outline`.
 
 ### Phase 4 — Section-by-section drafting
@@ -167,11 +169,11 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - Goal: each outline section → its own model call, stitched into `final.md`.
 
 ### Phase 5 — Humanization rewrite
-- Files: `prompts/rewrite.md`, `.claude/skills/seo-rewrite.md`. The wrapper already swaps models through `LLM_MODEL`.
+- Files: `prompts/rewrite.md`, `.claude/skills/seo-rewrite/SKILL.md`. The wrapper already swaps models through `LLM_MODEL`.
 - Goal: a post-draft rewrite pass reduces repetition. Its model is chosen from the router's presets when this phase is planned.
 
 ### Phase 6 — Metadata + keywords
-- Files: `prompts/metadata.md`, `prompts/keywords.md`, `.claude/skills/seo-metadata.md`, `.claude/skills/seo-keywords.md`.
+- Files: `prompts/metadata.md`, `prompts/keywords.md`, `.claude/skills/seo-metadata/SKILL.md`, `.claude/skills/seo-keywords/SKILL.md`.
 - Goal: title, description, slug, FAQ, keyword expansion written to `meta.json`.
 
 ### Phase 7 — Docs + SEO knowledge base
@@ -206,7 +208,7 @@ Project contains `AGENTS.md`, `PLAN.md`, and Phase-1-shaped stubs (`briefs/examp
 ## Risks
 
 1. **Repetitive outputs** → multi-pass rewrite, prompt variation, section drafting.
-2. **Hallucinated SEO claims** → ground prompts in `docs/google/*` (Phase 6); deterministic temps for metadata.
+2. **Hallucinated SEO claims** → ground prompts in `docs/google/*` (Phase 7); deterministic temps for metadata.
 3. **Over-engineering** → no workflow engine, no DB; skills + files only.
 4. **Router instability or model swaps** → single retry, then halt with an `.ERROR.md` marker and resume by hand. Another app using a different preset unloads `qwen`, so the next call pays its load time.
 
