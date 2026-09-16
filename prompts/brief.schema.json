@@ -1,21 +1,58 @@
 {
   "type": "object",
   "properties": {
-    "topic": { "type": "string", "minLength": 1 },
-    "target_audience": { "type": "string", "minLength": 1 },
+    "topic": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_audience": {
+      "type": "string",
+      "minLength": 1
+    },
     "tone": {
       "type": "string",
-      "enum": ["Professional", "Authoritative", "Conversational", "Friendly", "Technical"]
+      "enum": [
+        "Professional",
+        "Authoritative",
+        "Conversational",
+        "Friendly",
+        "Technical"
+      ]
     },
-    "word_count": { "type": "integer", "minimum": 1 },
+    "word_count": {
+      "type": "integer",
+      "minimum": 1
+    },
     "keywords": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 },
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
       "minItems": 3,
       "maxItems": 6
     },
-    "cta": { "type": "string", "minLength": 1 }
+    "cta": {
+      "type": "string",
+      "minLength": 1
+    },
+    "facts": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "maxItems": 40
+    }
   },
-  "required": ["topic", "target_audience", "tone", "word_count", "keywords", "cta"],
+  "required": [
+    "topic",
+    "target_audience",
+    "tone",
+    "word_count",
+    "keywords",
+    "cta",
+    "facts"
+  ],
   "additionalProperties": false
 }

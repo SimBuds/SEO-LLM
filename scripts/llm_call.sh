@@ -17,6 +17,10 @@ TEMPERATURE="${2:-0.7}"
 SEED="${3:-0}"
 SCHEMA_FILE="${4:-}"
 HOST="${LLM_HOST:-http://localhost:8080}"
+# Optional caps: LLM_MAX_TOKENS bounds the reply (a schema-constrained reply can
+# otherwise loop until the context fills), LLM_TIMEOUT bounds the request in seconds.
+MAX_TOKENS="${LLM_MAX_TOKENS:-}"
+TIMEOUT="${LLM_TIMEOUT:-}"
 MODEL="${LLM_MODEL:-qwen}"
 MIN_CTX=32768
 
@@ -61,6 +65,7 @@ PAYLOAD=$(jq -n \
   --rawfile prompt "$PROMPT_FILE" \
   --argjson temperature "$TEMPERATURE" \
   --argjson seed "$SEED" \
+  --arg max_tokens "$MAX_TOKENS" \
   "${SCHEMA_ARGS[@]}" \
   '{
     model: $model,
@@ -78,6 +83,7 @@ PAYLOAD=$(jq -n \
     repeat_penalty: 1.05,
     chat_template_kwargs: {enable_thinking: false}
   }
+  + (if $max_tokens == "" then {} else {max_tokens: ($max_tokens | tonumber)} end)
   + if $schema == null then {} else
       # Nested json_schema shape per the Local-LLM contract. The top-level
       # "schema" shape from the llama-server README was ignored on build 10968.
@@ -86,7 +92,7 @@ PAYLOAD=$(jq -n \
 
 # On HTTP error, --fail-with-body leaves the server's explanation in RESPONSE.
 # Print it before exiting, or set -e drops it and only the status code shows.
-RESPONSE=$(curl -sS --fail-with-body -X POST "$HOST/v1/chat/completions" \
+RESPONSE=$(curl -sS --fail-with-body ${TIMEOUT:+--max-time "$TIMEOUT"} -X POST "$HOST/v1/chat/completions" \
   -H 'Content-Type: application/json' \
   --data-binary @- <<< "$PAYLOAD") || { rc=$?; echo "$RESPONSE" >&2; exit "$rc"; }
 

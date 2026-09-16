@@ -14,27 +14,21 @@ Generate a structured article outline from a JSON brief via the llama.cpp router
 ## Preconditions
 
 1. The llama.cpp router serves `qwen`: `curl -s localhost:8080/models | jq -er '.data[] | select(.id=="qwen") | .id'` prints `qwen`. If it prints nothing or exits non-zero, tell the user the router on `localhost:8080` is not serving `qwen` and stop.
+2. The brief passes `bash scripts/check.sh brief <brief.json>`. If it fails, show the FAIL line and stop.
 
 ## Steps
 
-1. Read the brief. Extract: `topic`, `target_audience`, `tone`, `word_count`, `keywords` (list), `cta`.
-2. Derive an output slug from `topic` (lowercase, hyphens, no punctuation).
-3. Read `prompts/outline.md`. Substitute placeholders:
-   - `{{TOPIC}}` → `topic`
-   - `{{AUDIENCE}}` → `target_audience`
-   - `{{TONE}}` → `tone`
-   - `{{WORD_COUNT}}` → `word_count`
-   - `{{KEYWORDS}}` → comma-joined keywords
-   - `{{CTA}}` → `cta`
-4. Write the filled prompt to `outputs/<slug>/_outline_prompt.txt`.
-5. Run: `bash scripts/llm_call.sh outputs/<slug>/_outline_prompt.txt 0.3 1`
-6. Save stdout to `outputs/<slug>/outline.md`.
-7. Report: model used, output path, count of H2 sections, whether `## FAQ` and `## Conclusion` are present.
+1. The slug is the brief's basename without `.json` (`briefs/test-brief.json` → `test-brief`). Outputs go to `outputs/<slug>/` (create it if needed).
+2. Fill the prompt: `bash scripts/fill_prompt.sh prompts/outline.md --brief <brief.json> > outputs/<slug>/_outline_prompt.txt`
+3. Run: `bash scripts/llm_call.sh outputs/<slug>/_outline_prompt.txt 0.3 1 > outputs/<slug>/outline.md`
+4. Check: `bash scripts/check.sh outline outputs/<slug>/outline.md <brief.json>`
+5. Report: output path, topic H2 count, FAQ question count, and every FAIL/WARN line. If the check passed, suggest `/seo-draft <brief.json>`.
 
 ## Failure handling
 
-- If the script exits non-zero, surface the error and stop. Do not retry silently.
-- If the outline lacks `# ` H1, `## FAQ`, or `## Conclusion`, report which is missing and ask whether to regenerate.
+- If `llm_call.sh` exits non-zero, surface the error and stop. Do not retry silently.
+- If `check.sh outline` fails, report the FAIL lines and ask whether to regenerate. A rerun with the same seed usually repeats the output, so offer seed 2 (then 3) for the retry: `bash scripts/llm_call.sh outputs/<slug>/_outline_prompt.txt 0.3 2`.
+- WARN lines do not block `/seo-draft`, but mention them.
 
 ## Out of scope
 

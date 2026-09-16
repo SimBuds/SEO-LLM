@@ -35,7 +35,7 @@ User in Claude Code
        └─ skill reads brief + prompts/*.md
             ├─ Bash: scripts/llm_call.sh prompts/outline.md                  → outline.md
             ├─ Bash: per-section call (qwen, prompts/section.md)            → sections/*.md
-            ├─ Bash: per-section rewrite (model TBD, prompts/rewrite.md)    → humanized
+            ├─ Bash: per-section rewrite (REWRITE_MODEL, prompts/rewrite.md) → rewrite/, final.md
             ├─ Bash: metadata + keywords pass (qwen)                        → meta.json
             └─ Write outputs/<slug>/final.md
 ```
@@ -49,8 +49,8 @@ No Python app. No workflow engine. No SQLite.
 ```
 SEO-LLM/
 ├── .claude/
-│   ├── skills/              # <name>/SKILL.md per command. Built: /seo-ingest, /seo-outline, /seo-draft. Planned: /seo-rewrite, /seo-metadata, /seo-keywords, /seo-generate
-│   └── settings.json        # allow Bash(scripts/llm_call.sh:*) and Bash(curl -s localhost:8080/models)
+│   ├── skills/              # <name>/SKILL.md per command. Built: /seo-ingest, /seo-outline, /seo-draft, /seo-rewrite. Planned: /seo-metadata, /seo-keywords, /seo-generate
+│   └── settings.json        # allow the three scripts, jq, extractors, and Bash(curl -s localhost:8080/models)
 ├── prompts/
 │   ├── system.md            # system message sent on every model call
 │   ├── system/              # SEO standards, anti-generic rules, tone, EEAT
@@ -62,7 +62,9 @@ SEO-LLM/
 │   ├── metadata.md
 │   └── keywords.md
 ├── scripts/
-│   └── llm_call.sh          # curl wrapper: prompt-file (+ optional temp/seed) + prompts/system.md → stdout
+│   ├── llm_call.sh          # curl wrapper: prompt-file (+ optional temp/seed) + prompts/system.md → stdout
+│   ├── fill_prompt.sh       # {{PLACEHOLDER}} filling from brief / outline / source text
+│   └── check.sh             # FAIL/WARN checks for brief, outline, draft
 ├── briefs/                  # JSON inputs
 ├── outputs/                 # <brief-slug>/{outline.md, sections/, final.md, meta.json}
 ├── docs/
@@ -82,7 +84,8 @@ SEO-LLM/
   "tone": "Professional",
   "word_count": 2500,
   "keywords": ["dental seo", "local dental marketing", "dentist google rankings"],
-  "cta": "Book a consultation"
+  "cta": "Book a consultation",
+  "facts": ["Clinic opened in 2012", "New-patient exams are free"]
 }
 ```
 
@@ -110,16 +113,16 @@ CC invokes it via the Bash tool. No Python wrapper, no client library.
 |-----------|------------|-------------|-------|
 | ingest    | qwen       | 0.2         | fixed |
 | outline   | qwen       | 0.3         | fixed |
-| draft     | qwen       | 0.7         | fixed |
-| section   | qwen       | 0.6         | fixed |
-| rewrite   | TBD        | 0.8         | fixed |
+| section   | qwen       | 0.5         | 1, retry 2 |
+| verify    | qwen (gemma via VERIFY_MODEL) | 0.1 | 1 |
+| rewrite   | REWRITE_MODEL (see Phase 5) | 0.7 | 1, retry 2 |
 | metadata  | qwen       | 0.2         | fixed |
 
 Context is not a per-stage knob. Each router preset fixes it per model (65536 for all three presets since the 2026-09-16 redeploy), and a prompt over it returns HTTP 400 instead of being truncated. `scripts/llm_call.sh` reads the served value from `/models` before each call and aborts if it is below this repo's 32768 minimum or cannot be read, so a shrunken preset fails loudly instead of silently cutting the budget. The other sampling values (`top_p`, `top_k`, `min_p`, `presence_penalty`, `repeat_penalty`) are pinned in `scripts/llm_call.sh` and sent on every call, so behavior is defined in this repo rather than by the router's defaults.
 
 ### Failure handling
 
-- If a per-section call fails (non-2xx or empty body), the skill retries once with a slightly higher temperature, then writes `sections/<n>.ERROR.md` and stops the pipeline. Resume is manual: re-running the skill skips sections that already have a non-error file.
+- If a per-section check fails, `scripts/draft_sections.sh` retries once with seed 2, then writes `sections/NN-<heading>.ERROR.md` and stops. An HTTP error or empty reply stops it at once. Re-running skips sections that already exist and pass.
 
 ---
 
@@ -128,8 +131,10 @@ Context is not a per-stage knob. Each router preset fixes it per model (65536 fo
 ```
 outputs/<brief-slug>/
 ├── outline.md
+├── draft.md
 ├── sections/
-│   ├── 01-<heading-slug>.md
+│   ├── 00-intro.md
+│   ├── 01-<heading-slug>.{block.md,prompt.txt,md}
 │   └── ...
 ├── humanized/
 │   └── 01-<heading-slug>.md
@@ -164,13 +169,16 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - Files: `prompts/ingest.md`, `.claude/skills/seo-ingest/SKILL.md`, `.claude/settings.json` (allow `pandoc` + `pdftotext`), `PLAN.md`, `README.md`.
 - Goal: `/seo-ingest <file>` extracts text (pandoc for .docx, pdftotext for .pdf, passthrough for .md/.txt) and emits `briefs/<slug>.json` matching the brief schema for the user to review before running `/seo-outline`.
 
-### Phase 4 — Section-by-section drafting
-- Files: update `seo-draft` to loop sections; `prompts/intro.md`, `prompts/conclusion.md`.
-- Goal: each outline section → its own model call, stitched into `final.md`.
+### Phase 4 — Section-by-section drafting (done 2026-09-16)
+- Files: `scripts/draft_sections.sh`, `prompts/intro.md`, `prompts/section.md` (now per section), `prompts/conclusion.md`, `seo-draft` skill.
+- Goal: each outline section → its own model call, stitched into `draft.md` (the rewrite phase produces `final.md`).
+- Each part then gets a fact-verification call (`prompts/verify.md`) whose replacements are applied only when they pass deterministic guards; see README.
+- Failure handling as implemented: a failed section check is retried once with seed 2 (not a higher temperature: the same seed repeats the output, a new seed does not), then saved as `sections/NN-<heading>.ERROR.md`.
 
-### Phase 5 — Humanization rewrite
-- Files: `prompts/rewrite.md`, `.claude/skills/seo-rewrite/SKILL.md`. The wrapper already swaps models through `LLM_MODEL`.
-- Goal: a post-draft rewrite pass reduces repetition. Its model is chosen from the router's presets when this phase is planned.
+### Phase 5 — Humanization rewrite (done 2026-09-16)
+- Files: `prompts/rewrite.md`, `scripts/rewrite_sections.sh`, `.claude/skills/seo-rewrite/SKILL.md`, `check.sh rewrite`.
+- Goal: a post-draft rewrite pass reduces repetition and awkward keyword phrasing without changing facts; writes `final.md`.
+- Model: chosen by a qwen vs gemma comparison on the three test briefs (see IMPLEMENT.md); `REWRITE_MODEL` overrides.
 
 ### Phase 6 — Metadata + keywords
 - Files: `prompts/metadata.md`, `prompts/keywords.md`, `.claude/skills/seo-metadata/SKILL.md`, `.claude/skills/seo-keywords/SKILL.md`.

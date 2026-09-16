@@ -1,0 +1,46 @@
+{
+  "type": "object",
+  "properties": {
+    "issues": {
+      "type": "array",
+      "maxItems": 15,
+      "items": {
+        "type": "object",
+        "properties": {
+          "sentence": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "invented",
+              "strengthened",
+              "contradiction",
+              "supported"
+            ]
+          },
+          "problem": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "replacement": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sentence",
+          "kind",
+          "problem",
+          "replacement"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "issues"
+  ],
+  "additionalProperties": false
+}

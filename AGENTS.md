@@ -1247,7 +1247,9 @@ repos, and one ended in a colon with no template after it.)
 
 - **Stack: Claude Code skills, bash, `jq`, and `curl`. Nothing else.** The
   pipeline is markdown skills in `.claude/skills/`, prompt files in `prompts/`,
-  and one shell wrapper. No Python application, no web framework, no database,
+  the model wrapper, and two helper scripts (`fill_prompt.sh` fills templates,
+  `check.sh` holds every structural check; added 2026-09-16 so skills stop
+  hand-rolling substitution and validation). No Python application, no web framework, no database,
   and no client library for the model. (Decided 2026-09-14. The earlier Python
   and Streamlit `seo-app` design is retired and stays recoverable from commit
   `0c7031b`.)
@@ -1267,8 +1269,11 @@ repos, and one ended in a colon with no template after it.)
   strict value knowing a smaller preset stops all calls until the constant is
   edited. (Added 2026-09-15.)
 - **Briefs are JSON, validated with `jq`.** `prompts/brief.schema.json`
-  constrains what the router may return during ingest, and `/seo-ingest`
-  re-checks the saved file. `yq` is not installed and is not a dependency.
+  constrains what the router may return during ingest, and
+  `scripts/check.sh brief` re-checks the saved file. A brief's `facts` list is
+  the only source of business specifics for the outline and draft; prompts
+  forbid inventing or strengthening them. (Added 2026-09-16 after drafts
+  invented shipping, warranty, and founder details.) `yq` is not installed and is not a dependency.
   (Decided 2026-09-15: JSON plus schema-enforced output was chosen over
   installing `yq`.)
 - **The llama.cpp router is a shared service this repo does not own.** It is

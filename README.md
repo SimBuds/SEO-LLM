@@ -11,8 +11,13 @@ User in Claude Code
   ├─ /seo-outline briefs/<brief>.json        (Phase 2 — outline first)
   │    └─ scripts/llm_call.sh prompts/outline.md
   │         └─ writes outputs/<slug>/outline.md
-  └─ /seo-draft   briefs/<brief>.json        (Phase 2 — draft from outline)
-       └─ scripts/llm_call.sh prompts/section.md (+ outline injected)
+  └─ /seo-draft   briefs/<brief>.json        (Phase 4 — draft section by section)
+       └─ scripts/draft_sections.sh: one scripts/llm_call.sh call per part
+            prompts/intro.md, prompts/section.md (each H2 + FAQ), prompts/conclusion.md
+            └─ writes outputs/<slug>/sections/*.md, stitched into draft.md
+  └─ /seo-rewrite briefs/<brief>.json        (Phase 5 — edit for readability)
+       └─ scripts/rewrite_sections.sh: one call per part, prompts/rewrite.md
+            └─ writes outputs/<slug>/rewrite/*.md, stitched into final.md
 
 Every scripts/llm_call.sh call → POST localhost:8080/v1/chat/completions
   model qwen, system message prompts/system.md, thinking off
@@ -33,10 +38,14 @@ Later phases add section-by-section drafting, a humanization rewrite pass (model
 SEO-LLM/
 ├── .claude/
 │   ├── skills/         # one directory per slash command, each holding SKILL.md
-│   └── settings.json   # Bash allow-list: the wrapper, the router model check, jq, doc extractors
+│   └── settings.json   # Bash allow-list: the three scripts, the router model check, jq, doc extractors
 ├── prompts/            # markdown prompt templates with {{PLACEHOLDERS}}, plus system.md (sent on every call)
 ├── scripts/
-│   └── llm_call.sh     # curl wrapper: prompt-file + prompts/system.md → reply on stdout
+│   ├── llm_call.sh     # curl wrapper: prompt-file + prompts/system.md → reply on stdout
+│   ├── fill_prompt.sh  # fills a template's {{PLACEHOLDERS}} from a brief, outline, or source text
+│   ├── draft_sections.sh # section-by-section drafting loop: split, budget, call, verify, check, retry, stitch
+│   ├── rewrite_sections.sh # per-part readability edit with guards, stitched into final.md
+│   └── check.sh        # deterministic checks on a brief, outline, or draft (FAIL/WARN lines)
 ├── briefs/             # user inputs (JSON)
 ├── outputs/            # generated articles, one directory per brief (gitignored)
 ├── AGENTS.md           # workflow contract for any AI agent in this repo
@@ -77,7 +86,8 @@ SEO-LLM/
    /seo-draft   briefs/example.json
    ```
    The draft needs the outline, so running `/seo-draft` first stops with a message.
-5. Inspect `outputs/<slug>/outline.md` and `outputs/<slug>/draft.md`.
+   Then polish it with `/seo-rewrite briefs/example.json`.
+5. Inspect `outputs/<slug>/outline.md`, `outputs/<slug>/draft.md`, and `outputs/<slug>/final.md`.
 
 ## The model wrapper
 
@@ -89,7 +99,8 @@ Posts a non-streaming request to `/v1/chat/completions` and prints `.choices[0].
 - Temperature defaults to 0.7 and seed to 0. `top_p`, `top_k`, `min_p`, `presence_penalty`, and `repeat_penalty` are pinned in the script and sent on every call.
 - Thinking is off (`chat_template_kwargs: {"enable_thinking": false}`).
 - With a schema file (a JSON object, as in [prompts/brief.schema.json](prompts/brief.schema.json)), the reply is constrained to that schema via `response_format`. `/seo-ingest` uses this. Without it the payload is unchanged.
-- `LLM_HOST` (default `http://localhost:8080`) and `LLM_MODEL` (default `qwen`) override the target.
+- `LLM_HOST` (default `http://localhost:8080`) and `LLM_MODEL` (default `qwen`) override the target. The router also serves `gemma` and `lite`.
+- `LLM_MAX_TOKENS` caps the reply and `LLM_TIMEOUT` (seconds) caps the request; both are unset by default. The verifier sets them because a schema-constrained reply once ran for over ten minutes.
 - Before each call it reads `GET /models` and requires the served context to be at least `MIN_CTX` (32768, the constant at the top of the script). Below that it exits 3 without calling the model. A loaded model reports `meta.n_ctx`, an unloaded one carries `--ctx-size` in `status.args`, so the check works in both states and never forces a model load.
 - If the context cannot be read at all (`/models` unreachable, the model absent from the list, or neither field present), it exits non-zero rather than calling on an unverified context. A router that changes the shape of `/models` therefore stops calls until the script is updated, which is deliberate.
 - Exits non-zero on an HTTP error, printing the server's error body to stderr, and on an empty reply.
@@ -103,20 +114,57 @@ Posts a non-streaming request to `/v1/chat/completions` and prints `.choices[0].
   "tone": "Professional",
   "word_count": 2500,
   "keywords": ["dental seo", "local dental marketing", "dentist google rankings"],
-  "cta": "Book a consultation"
+  "cta": "Book a consultation",
+  "facts": ["Clinic opened in 2012", "New-patient exams are free"]
 }
 ```
 
-All six keys are required. `tone` is one of `Professional`, `Authoritative`, `Conversational`, `Friendly`, or `Technical`, `word_count` is a whole number, and `keywords` holds 3 to 6 entries. [prompts/brief.schema.json](prompts/brief.schema.json) states the same rules for the router, and `/seo-ingest` checks a generated brief against them with `jq`.
+All seven keys are required. `facts` lists the business specifics (names, prices, policies, timelines) the outline and draft may state; the prompts forbid inventing any others. It may be empty for a generic topic and holds at most 40 entries. `tone` is one of `Professional`, `Authoritative`, `Conversational`, `Friendly`, or `Technical`, `word_count` is a whole number, and `keywords` holds 3 to 6 entries. [prompts/brief.schema.json](prompts/brief.schema.json) states the same rules for the router, and `/seo-ingest` checks a generated brief against them with `jq`.
 
-The skill substitutes these into `prompts/section.md` placeholders (`{{BRIEF}}`, `{{TONE}}`, `{{AUDIENCE}}`, `{{KEYWORDS}}`, `{{WORD_COUNT}}`, `{{CTA}}`).
+`scripts/fill_prompt.sh` substitutes these into the templates' placeholders (`{{TOPIC}}`, `{{BRIEF}}`, `{{TONE}}`, `{{AUDIENCE}}`, `{{KEYWORDS}}`, `{{WORD_COUNT}}`, `{{CTA}}`, `{{FACTS}}`, plus `{{OUTLINE}}` and `{{SOURCE_TEXT}}`) and exits 1 if a template placeholder is left unfilled.
+
+`word_count` also sizes the outline: up to 1000 words gets 2–3 topic sections, up to 1800 gets 3–5, longer gets 4–6 (the table in [prompts/outline.md](prompts/outline.md), mirrored in `scripts/check.sh`).
+
+## Section-by-section drafting
+
+`/seo-draft` runs `scripts/draft_sections.sh <brief.json>`, which turns the outline into parts and drafts each with its own call:
+
+- **Parts.** `00-intro` (no heading; the H1 is added at stitch time), then one part per H2 in outline order. The FAQ uses `prompts/section.md`; the Conclusion uses `prompts/conclusion.md`, which ends on the brief's CTA.
+- **Budget.** The draft aims at `DRAFT_FACTOR` percent of `word_count` (default 135), because the rewrite pass cuts filler and lands near 70% of the draft. Of that total: intro about 8%, conclusion about 6%, FAQ 60 words per question (at most 20%), and the rest split across topic sections by their H3 count. Each prompt asks for 90–110% of its budget.
+- **Keywords.** Each primary keyword keeps its cue in only the first two parts that list it (the intro counts as one use of the first keyword), and the FAQ gets none, because the model stuffs cues into its questions.
+- **Repairs.** After each call the script puts the outline's heading wording back when the heading structure matches, and strips bold. Then `check.sh section` runs; a failure is retried once with seed 2, and a second failure is saved as `.ERROR.md` and stops the run.
+- **Fact verification.** Each passing part gets a second call (`prompts/verify.md`, schema-constrained, temperature 0.1) that lists sentences the facts do not support, typed `invented`, `strengthened`, or `contradiction`, each with a replacement. The script applies replacements as literal swaps and rejects any that is not found verbatim, touches the CTA sentence, brings in words absent from the sentence and the facts (compared by first four letters), or, for `strengthened`, drops over half the sentence. Everything is logged in `sections/NN-<heading>.verify.json`; the original text stays in `.unverified.md`, and is restored if the verified part fails its check. Rejected issues remain in the draft for review. `VERIFY_MODEL=gemma` runs the verifier on Gemma instead; on the About test page the two flagged nearly the same sentences at the same speed.
+- **Resume.** Rerunning skips parts that exist and pass. Saved parts older than `outline.md` are discarded, as is everything with `--fresh`.
+
+Every part sees the brief's audience, tone, facts, and the outline's headings, so it knows what the other sections cover without repeating them.
+
+## Rewrite pass
+
+`/seo-rewrite` runs `scripts/rewrite_sections.sh <brief.json>` after `/seo-draft`. Each part is edited in order with `prompts/rewrite.md`: fix pasted keyword phrases, cut filler and sentences that repeat earlier parts, vary sentence openings, and fix the verifier's rejected issues for that part, which are passed in. Each call sees the parts already edited.
+
+The edit is checked against its input with `check.sh rewrite`: identical headings, 50–120% of the length (cutting filler shortens parts; growth is where new claims come from), no call to action added to a part that lacked it, no numbers absent from the input and the facts, no more absolute-wording sentences than before, and the CTA sentence kept. A failure is retried with seed 2; a second failure keeps the drafted part with a WARN, because the rewrite is polish and never blocks the article. `REWRITE_MODEL=gemma` switches the model.
+
+## Checks
+
+`scripts/check.sh` holds every structural rule, and each skill runs it after its model call:
+
+| Mode | FAIL (regenerate or fix) | WARN (look at it) |
+| --- | --- | --- |
+| `brief <brief.json> [source.txt]` | schema mismatch | CTA mentions on-page UI, single-word or page-name keywords, empty facts, fact numbers absent from the source |
+| `outline <outline.md> <brief.json>` | not exactly one H1, missing FAQ/Conclusion, any body text, an H2 without an Intent line | section or FAQ counts outside the size table, H3s under Conclusion, lowercase keyword pasted into a heading |
+| `section <part.md> <block.md or -> <words> <brief.json>` | headings differ from the block (or any heading in the intro), guidance lines or code fence left in, CTA missing from the conclusion | words outside 60–125% of the budget, bolded keyword |
+| `rewrite <new.md> <old.md> <brief.json>` | headings changed, length outside 50–120%, CTA added where there was none, numbers absent from the input and facts, more absolute-wording sentences, CTA sentence lost | bold left in |
+| `draft <draft.md> <outline.md> <brief.json> [percent]` (135 for `draft.md`) | H1/H2 differ from the outline, outline guidance lines left in | length outside ±15%, CTA missing from Conclusion, a keyword used more than twice, bolded keywords, numbers not in the facts or outline, sentences with absolute wording (all, every, guaranteed…) |
+
+The checks catch structure and invented digits, not invented prose. The skills therefore also ask Claude Code to audit facts against the source (ingest) or the brief's `facts` (draft) and report anything added or strengthened.
 
 ## Where files land
 
-The slug comes from the brief's `topic`, lowercased with punctuation dropped and
-spaces turned into hyphens, so `How to Choose an Engagement Ring` becomes
-`how-to-choose-an-engagement-ring`. `/seo-ingest` instead derives its slug from
-the source file's basename.
+The slug is the brief's file name without `.json`, so `briefs/test-brief.json`
+writes to `outputs/test-brief/`. `/seo-ingest` derives it from the source file's
+basename (`client-notes.pdf` → `briefs/client-notes.json`), so a document, its
+brief, and its outputs share one name, and editing a brief's `topic` does not
+orphan its outline.
 
 | Path | Written by | What it is |
 | --- | --- | --- |
@@ -125,13 +173,20 @@ the source file's basename.
 | `briefs/<slug>.json` | `/seo-ingest` | The brief, for you to review and edit |
 | `outputs/<slug>/_outline_prompt.txt` | `/seo-outline` | The filled outline prompt |
 | `outputs/<slug>/outline.md` | `/seo-outline` | The outline, consumed by `/seo-draft` |
-| `outputs/<slug>/_prompt.txt` | `/seo-draft` | The filled draft prompt, outline included |
-| `outputs/<slug>/draft.md` | `/seo-draft` | The article draft |
+| `outputs/<slug>/sections/NN-<heading>.block.md` | `/seo-draft` | One outline block per H2, keyword cues de-duplicated |
+| `outputs/<slug>/sections/NN-<heading>.prompt.txt` | `/seo-draft` | The filled prompt for that part (`00-intro` has no block) |
+| `outputs/<slug>/sections/NN-<heading>.md` | `/seo-draft` | The drafted part after verification; `.ERROR.md` when it failed twice |
+| `outputs/<slug>/sections/NN-<heading>.verify.json` | `/seo-draft` | Verifier findings, each marked `accepted` or with a `reject` reason |
+| `outputs/<slug>/sections/NN-<heading>.unverified.md` | `/seo-draft` | The part as drafted, before verification |
+| `outputs/<slug>/draft.md` | `/seo-draft` | The stitched article draft |
+| `outputs/<slug>/rewrite/NN-<heading>.{prompt.txt,md}` | `/seo-rewrite` | Each part's edit prompt and edited text (the drafted text when the edit failed twice) |
+| `outputs/<slug>/final.md` | `/seo-rewrite` | The stitched, edited article |
 
 `outputs/` and `briefs/_ingest/` are gitignored. The `_`-prefixed prompt files are
 kept on purpose: when a result looks wrong, they show exactly what the model was
 asked. Each stage pins its own sampling: ingest runs at temperature 0.2 seed 1,
-outline at 0.3 seed 1, and draft at 0.7 seed 0.
+outline at 0.3 seed 1, and each draft section at 0.5 seed 1. A failed check is retried with
+seed 2, because the same seed usually repeats the same output.
 
 ## Running without Claude Code
 
@@ -145,25 +200,16 @@ to check the router end to end:
 printf 'In one sentence, what is your role?\n' > /tmp/role.txt
 bash scripts/llm_call.sh /tmp/role.txt 0.2 1
 
-# 2. Build an outline prompt by hand from a brief, then call the model.
-python3 - <<'FILL' > /tmp/outline_prompt.txt
-import json
-b = json.load(open("briefs/example.json"))
-t = open("prompts/outline.md").read()
-for k, v in {"TOPIC": b["topic"], "AUDIENCE": b["target_audience"],
-             "TONE": b["tone"], "WORD_COUNT": str(b["word_count"]),
-             "KEYWORDS": ", ".join(b["keywords"]), "CTA": b["cta"]}.items():
-    t = t.replace("{{" + k + "}}", v)
-print(t)
-FILL
-bash scripts/llm_call.sh /tmp/outline_prompt.txt 0.3 1 > /tmp/outline.md
+# 2. Build an outline prompt from a brief, call the model, check the result.
+mkdir -p outputs/example
+bash scripts/fill_prompt.sh prompts/outline.md --brief briefs/example.json > outputs/example/_outline_prompt.txt
+bash scripts/llm_call.sh outputs/example/_outline_prompt.txt 0.3 1 > outputs/example/outline.md
+bash scripts/check.sh outline outputs/example/outline.md briefs/example.json
+bash scripts/draft_sections.sh briefs/example.json
+bash scripts/check.sh draft outputs/example/draft.md outputs/example/outline.md briefs/example.json
 
 # 3. Check a brief against the schema the way /seo-ingest does.
-jq -e '(keys == ["cta","keywords","target_audience","tone","topic","word_count"])
-  and all(.topic, .target_audience, .tone, .cta; type == "string" and length > 0)
-  and (.word_count | type == "number" and . == floor and . >= 1)
-  and (.keywords | type == "array" and length >= 3 and length <= 6
-       and all(.[]; type == "string" and length > 0))' briefs/example.json
+bash scripts/check.sh brief briefs/example.json
 ```
 
 ## Troubleshooting

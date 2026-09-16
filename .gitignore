@@ -4,6 +4,7 @@ tutor-plan.md
 # generated pipeline output and ingest scratch
 outputs/
 briefs/_ingest/
+briefs/test-*
 
 # per-machine agent permissions (also in the global ignore, which no clone carries)
 .claude/settings.local.json
