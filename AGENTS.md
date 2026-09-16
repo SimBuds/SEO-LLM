@@ -1244,3 +1244,44 @@ repos, and one ended in a colon with no template after it.)
      Stack, platform, build commands, environment label sets, and domain
      rules belong here and in PLAN.md or README.md, never in the universal
      body above. -->
+
+- **Stack: Claude Code skills, bash, `jq`, and `curl`. Nothing else.** The
+  pipeline is markdown skills in `.claude/skills/`, prompt files in `prompts/`,
+  and one shell wrapper. No Python application, no web framework, no database,
+  and no client library for the model. (Decided 2026-09-14. The earlier Python
+  and Streamlit `seo-app` design is retired and stays recoverable from commit
+  `0c7031b`.)
+- **Every model call goes through `scripts/llm_call.sh`.** It is the gateway
+  this file's *LLM integration* section requires. A skill never posts to the
+  router itself, and no second caller of the HTTP endpoint is added. The skills
+  may call `GET /models` read-only as a liveness precondition.
+- **The wrapper always sends `prompts/system.md` as the system message**, and
+  callers cannot swap it. Router models carry no built-in system prompt, so a
+  call without one gets the bare model. Its "copy key names character for
+  character" bullet is load-bearing: without it the model wrote
+  `target_audone` instead of `target_audience` in most ingest runs.
+  (Added 2026-09-15 after that regression.)
+- **Minimum served context is 32768 tokens**, read from `/models` before every
+  call and enforced by `MIN_CTX` in the wrapper. Below that, or when the value
+  cannot be read at all, the wrapper aborts instead of calling. Casey chose the
+  strict value knowing a smaller preset stops all calls until the constant is
+  edited. (Added 2026-09-15.)
+- **Briefs are JSON, validated with `jq`.** `prompts/brief.schema.json`
+  constrains what the router may return during ingest, and `/seo-ingest`
+  re-checks the saved file. `yq` is not installed and is not a dependency.
+  (Decided 2026-09-15: JSON plus schema-enforced output was chosen over
+  installing `yq`.)
+- **The llama.cpp router is a shared service this repo does not own.** It is
+  configured and deployed from `~/Apps/Local-LLM`. Calling it and reading
+  `/models` are ordinary work. Restarting it, deploying a preset, or loading a
+  different model are service actions and stay with Casey under tier 0.
+- **Environment labels for handed commands: `local terminal` and
+  `Claude Code session`.** Use them in the form the README already uses,
+  `# Runs in: local terminal`.
+- **There is no automated test suite. Verification is a live run by hand.**
+  Follow the skill's steps against the real router and report observed output.
+  Those runs write to a scratch mirror of `briefs/` and `outputs/`, never to
+  the repo directories, and the scratch files are removed before handoff.
+- **Known environment gaps as of 2026-09-15:** `pandoc` is not installed, so
+  `.docx` ingest cannot run. `pdftotext` and `jq` are present. Report a missing
+  extractor to Casey rather than installing anything, per tier 0.

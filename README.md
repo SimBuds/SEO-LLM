@@ -30,7 +30,7 @@ Later phases add section-by-section drafting, a humanization rewrite pass (model
 ## Repository layout
 
 ```
-seo-cli/
+SEO-LLM/
 ├── .claude/
 │   ├── skills/         # slash commands invoked inside Claude Code
 │   └── settings.json   # Bash allow-list: the wrapper, the router model check, jq, doc extractors
@@ -38,7 +38,7 @@ seo-cli/
 ├── scripts/
 │   └── llm_call.sh     # curl wrapper: prompt-file + prompts/system.md → reply on stdout
 ├── briefs/             # user inputs (JSON)
-├── outputs/            # generated articles, one directory per brief
+├── outputs/            # generated articles, one directory per brief (gitignored)
 ├── AGENTS.md           # workflow contract for any AI agent in this repo
 ├── PLAN.md             # architecture + phased MVP plan
 └── README.md
@@ -106,6 +106,10 @@ The skill substitutes these into `prompts/section.md` placeholders (`{{BRIEF}}`,
 
 ## Working in this repo
 
-Read [AGENTS.md](AGENTS.md) before making changes. The 4-pillar docs are [AGENTS.md](AGENTS.md) (agent rules), [PLAN.md](PLAN.md) (architecture + phases), [IMPLEMENT.md](IMPLEMENT.md) (execution tracker — current state lives here), and this README (user/developer-facing). The short version: one phase at a time, ≤5 files per phase, walking-skeleton first, verify end-to-end against the live llama.cpp router, and end each phase with the literal handoff line.
+[AGENTS.md](AGENTS.md) is the source of truth for how work happens here. Read it before making changes. The other pillars are [PLAN.md](PLAN.md) (architecture and the phased MVP plan) and this README (user-facing and developer-facing).
 
-Current state: **Phase 3 (doc/PDF ingest) complete** — `/seo-ingest` produces a JSON brief from `.docx`/`.pdf`/`.md`/`.txt`; `/seo-outline` + `/seo-draft` consume it. Next up is Phase 4 (section-by-section drafting) — see [PLAN.md](PLAN.md).
+The fourth pillar, `IMPLEMENT.md`, is the execution tracker and holds the live state: which phase is active, what is done, what is deferred. It is untracked and gitignored on purpose, so a fresh clone has none. Its absence means no work is in flight, not that state was lost. Create it from the skeleton in `AGENTS.md` when you start a phase.
+
+The short version: one phase at a time, at most five files per phase, walking-skeleton first, verify end-to-end against the live llama.cpp router, and end each phase with the literal handoff line.
+
+This repo is SEO only. The tutor application that used to live alongside it now has its own repo, `~/Apps/Tutor-LLM`, and shares no code with this one.
