@@ -19,8 +19,8 @@ Router models carry no built-in system prompt. The wrapper sends `prompts/system
 ## Design principles
 
 1. **Local-first.** All generation hits `localhost:8080`.
-2. **CC is the harness.** No custom CLI, workflow engine, or storage layer — skills + prompts + Bash + files.
-3. **Deterministic pipelines.** Stages run in order; no autonomous loops in MVP.
+2. **CC is the harness.** No custom CLI, workflow engine, or storage layer. Just skills, prompts, Bash, and files.
+3. **Deterministic pipelines.** Stages run in order, with no autonomous loops in MVP.
 4. **Section-based generation.** Long articles are never produced in a single call.
 5. **Multi-pass quality.** Draft → rewrite → SEO/metadata.
 6. **SEO-centric.** Prompts ground in intent, semantic coverage, EEAT.
@@ -81,7 +81,8 @@ SEO-LLM/
 ├── AGENTS.md
 ├── Instructions.md          # stage-by-stage walk through the pipeline
 ├── PLAN.md
-└── README.md
+├── README.md
+└── SEO-GUIDE.md           # SEO reference reading, not read by the pipeline
 ```
 
 ---
@@ -100,7 +101,7 @@ SEO-LLM/
 }
 ```
 
-The shape is enforced twice: `prompts/brief.schema.json` constrains what the router may return during ingest, and a `jq` check in `/seo-ingest` validates the saved file.
+The shape is enforced twice: `prompts/brief.schema.json` constrains what the router may return during ingest, and `scripts/check.sh brief` re-checks the saved file with `jq`.
 
 ---
 
@@ -169,40 +170,41 @@ outputs/<brief-slug>/
 
 ## Phased MVP execution (per AGENTS.md)
 
-Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verification against the live llama.cpp router. **Live execution state — what is done, in progress, or remaining — lives in `IMPLEMENT.md` (untracked, see README), not here.** This section is the architectural breakdown; IMPLEMENT.md is the tracker.
+Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verification against the live llama.cpp router. **Live execution state (what is done, in progress, or remaining) lives in `IMPLEMENT.md` (untracked, see README), not here.** This section is the architectural breakdown, and IMPLEMENT.md is the tracker.
 
-### Phase 1 — Walking skeleton
+### Phase 1: Walking skeleton
 - Files: `scripts/llm_call.sh` (the wrapper, replaced for the llama.cpp router on 2026-09-15), `prompts/section.md`, `.claude/skills/seo-draft/SKILL.md`, `.claude/settings.json`, `briefs/example.json`.
 - Goal: `/seo-draft briefs/example.json` produces `outputs/<slug>/draft.md` via a single Qwen call.
 
-### Phase 2 — Outline stage
+### Phase 2: Outline stage
 - Files: `prompts/outline.md`, `.claude/skills/seo-outline/SKILL.md`, update `seo-draft` to consume the outline.
-- Goal: outline generated first and saved as `outline.md`; draft follows it.
+- Goal: outline generated first and saved as `outline.md`, and the draft follows it.
 
-### Phase 3 — Brief ingest from .docx / .pdf / .md / .txt
+### Phase 3: Brief ingest from .docx / .pdf / .md / .txt
 - Files: `prompts/ingest.md`, `.claude/skills/seo-ingest/SKILL.md`, `.claude/settings.json` (allow `pandoc` + `pdftotext`), `PLAN.md`, `README.md`.
 - Goal: `/seo-ingest <file>` extracts text (pandoc for .docx, pdftotext for .pdf, passthrough for .md/.txt) and emits `briefs/<slug>.json` matching the brief schema for the user to review before running `/seo-outline`.
+- Gap: `pandoc` is not installed on this machine, so `.docx` ingest does not run yet. PDF, `.md`, and `.txt` work.
 
-### Phase 4 — Section-by-section drafting (done 2026-09-16)
+### Phase 4: Section-by-section drafting (done 2026-09-16)
 - Files: `scripts/draft_sections.sh`, `prompts/intro.md`, `prompts/section.md` (now per section), `prompts/conclusion.md`, `seo-draft` skill.
 - Goal: each outline section → its own model call, stitched into `draft.md` (the rewrite phase produces `final.md`).
-- Each part then gets a fact-verification call (`prompts/verify.md`) whose replacements are applied only when they pass deterministic guards; see README.
+- Each part then gets a fact-verification call (`prompts/verify.md`) whose replacements are applied only when they pass deterministic guards (see README).
 - Failure handling as implemented: a failed section check is retried once with seed 2 (not a higher temperature: the same seed repeats the output, a new seed does not), then saved as `sections/NN-<heading>.ERROR.md`.
 
-### Phase 5 — Humanization rewrite (done 2026-09-16)
+### Phase 5: Humanization rewrite (done 2026-09-16)
 - Files: `prompts/rewrite.md`, `scripts/rewrite_sections.sh`, `.claude/skills/seo-rewrite/SKILL.md`, `check.sh rewrite`.
-- Goal: a post-draft rewrite pass reduces repetition and awkward keyword phrasing without changing facts; writes `final.md`.
-- Model: chosen by a qwen vs gemma comparison on the three test briefs (see IMPLEMENT.md); `REWRITE_MODEL` overrides.
+- Goal: a post-draft rewrite pass reduces repetition and awkward keyword phrasing without changing facts, and writes `final.md`.
+- Model: chosen by a qwen vs gemma comparison on the three test briefs (see IMPLEMENT.md). `REWRITE_MODEL` overrides it.
 
-### Phase 6 — Metadata + keywords
+### Phase 6: Metadata + keywords
 - Files: `prompts/metadata.md`, `prompts/keywords.md`, `.claude/skills/seo-metadata/SKILL.md`, `.claude/skills/seo-keywords/SKILL.md`.
 - Goal: title, description, slug, FAQ, keyword expansion written to `meta.json`.
 
-### Phase 7 — Docs + SEO knowledge base
+### Phase 7: Docs + SEO knowledge base
 - Files: `README.md`, `docs/google/{helpful-content,eeat,semantic-search,ai-content-guidelines}.md`, link from system prompt.
-- Goal: prompts ground in EEAT / helpful-content guidance; quickstart documented.
+- Goal: prompts ground in EEAT / helpful-content guidance, and the quickstart is documented.
 
-Deferred (post-MVP): SERP extraction, competitor analysis, RAG, autonomous research, internal linking, topical authority — Milestones 4–5 in the old plan.
+Deferred (post-MVP): SERP extraction, competitor analysis, RAG, autonomous research, internal linking, topical authority (Milestones 4 and 5 in the old plan).
 
 ---
 
@@ -214,7 +216,7 @@ After each phase:
 3. Inspect `outputs/<slug>/` for the artifacts that phase promised.
 4. Spot-check generated text for SEO structure (H2s, keyword presence, no robotic intros).
 
-No test framework in MVP — generation is the test.
+No test framework in MVP. Generation is the test.
 
 ---
 
@@ -222,21 +224,23 @@ No test framework in MVP — generation is the test.
 
 Project contains `AGENTS.md`, `PLAN.md`, and Phase-1-shaped stubs (`briefs/example.json`, `prompts/section.md`, `scripts/llm_call.sh`). External reuse:
 - **llama.cpp router**: call its OpenAI-compatible HTTP API directly through `scripts/llm_call.sh`, with no client library.
-- **Claude Code skills + Bash** — don't build a workflow engine.
-- **JSON** — `jq`, already on the box, for reading briefs and checking them against `prompts/brief.schema.json`.
+- **Claude Code skills + Bash**: don't build a workflow engine.
+- **JSON**: `jq`, already on the box, for reading briefs and checking them against `prompts/brief.schema.json`.
 
 ---
 
 ## Risks
 
 1. **Repetitive outputs** → multi-pass rewrite, prompt variation, section drafting.
-2. **Hallucinated SEO claims** → ground prompts in `docs/google/*` (Phase 7); deterministic temps for metadata.
-3. **Over-engineering** → no workflow engine, no DB; skills + files only.
+2. **Hallucinated SEO claims** → ground prompts in `docs/google/*` (Phase 7), and deterministic temps for metadata.
+3. **Over-engineering** → no workflow engine, no DB, only skills and files.
 4. **Router instability or model swaps** → single retry, then halt with an `.ERROR.md` marker and resume by hand. Another app using a different preset unloads `qwen`, so the next call pays its load time.
 
 ---
 
 ## Success criteria
+
+These describe the finished MVP. `/seo-generate` and `meta.json` are planned (Phases 6 and 7), so today the same result takes the four stage commands and has no metadata.
 
 MVP succeeds when a user can, on a local GPU box with the llama.cpp router serving `qwen`:
 1. Drop a JSON brief into `briefs/`.

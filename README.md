@@ -26,10 +26,10 @@ Every scripts/llm_call.sh call → POST localhost:8080/v1/chat/completions
 Phases 1 to 5 are built. Later phases add metadata and keywords (`meta.json`), a single `/seo-generate` command, and an SEO knowledge base. See [PLAN.md](PLAN.md) for the full phase breakdown, and [Instructions.md](Instructions.md) for a step-by-step walk through every stage.
 
 ### Why this shape
-- **CC is the harness.** Skills replace a CLI; the Bash tool replaces a workflow engine; files replace a database.
+- **CC is the harness.** Skills replace a CLI, the Bash tool replaces a workflow engine, and files replace a database.
 - **llama.cpp over HTTP.** One thin shell wrapper (`scripts/llm_call.sh`), no client library. The router's models carry no built-in system prompt, so the wrapper sends `prompts/system.md` on every call.
-- **Section-based, multi-pass.** Long articles are never produced in a single call; drafts get a separate rewrite pass.
-- **Deterministic.** Per-stage temperature and seed; no autonomous loops in MVP.
+- **Section-based, multi-pass.** Long articles are never produced in a single call, and drafts get a separate rewrite pass.
+- **Deterministic.** Per-stage temperature and seed, with no autonomous loops in MVP.
 
 ## Repository layout
 
@@ -51,7 +51,8 @@ SEO-LLM/
 ├── AGENTS.md           # workflow contract for any AI agent in this repo
 ├── Instructions.md     # stage-by-stage walk through the whole pipeline
 ├── PLAN.md             # architecture + phased MVP plan
-└── README.md
+├── README.md
+└── SEO-GUIDE.md        # SEO reference reading, not read by the pipeline
 ```
 
 ## Prerequisites
@@ -101,7 +102,7 @@ Posts a non-streaming request to `/v1/chat/completions` and prints `.choices[0].
 - Thinking is off (`chat_template_kwargs: {"enable_thinking": false}`).
 - With a schema file (a JSON object, as in [prompts/brief.schema.json](prompts/brief.schema.json)), the reply is constrained to that schema via `response_format`. `/seo-ingest` uses this. Without it the payload is unchanged.
 - `LLM_HOST` (default `http://localhost:8080`) and `LLM_MODEL` (default `qwen`) override the target. The router also serves `gemma` and `lite`.
-- `LLM_MAX_TOKENS` caps the reply and `LLM_TIMEOUT` (seconds) caps the request; both are unset by default. The verifier sets them because a schema-constrained reply once ran for over ten minutes.
+- `LLM_MAX_TOKENS` caps the reply and `LLM_TIMEOUT` (seconds) caps the request. Both are unset by default. The verifier sets them because a schema-constrained reply once ran for over ten minutes.
 - Before each call it reads `GET /models` and requires the served context to be at least `MIN_CTX` (32768, the constant at the top of the script). Below that it exits 3 without calling the model. A loaded model reports `meta.n_ctx`, an unloaded one carries `--ctx-size` in `status.args`, so the check works in both states and never forces a model load.
 - If the context cannot be read at all (`/models` unreachable, the model absent from the list, or neither field present), it exits non-zero rather than calling on an unverified context. A router that changes the shape of `/models` therefore stops calls until the script is updated, which is deliberate.
 - Exits non-zero on an HTTP error, printing the server's error body to stderr, and on an empty reply.
@@ -120,21 +121,21 @@ Posts a non-streaming request to `/v1/chat/completions` and prints `.choices[0].
 }
 ```
 
-All seven keys are required. `facts` lists the business specifics (names, prices, policies, timelines) the outline and draft may state; the prompts forbid inventing any others. It may be empty for a generic topic and holds at most 40 entries. `tone` is one of `Professional`, `Authoritative`, `Conversational`, `Friendly`, or `Technical`, `word_count` is a whole number, and `keywords` holds 3 to 6 entries. [prompts/brief.schema.json](prompts/brief.schema.json) states the same rules for the router, and `/seo-ingest` checks a generated brief against them with `jq`.
+All seven keys are required. `facts` lists the business specifics (names, prices, policies, timelines) the outline and draft may state, and the prompts forbid inventing any others. It may be empty for a generic topic and holds at most 40 entries. `tone` is one of `Professional`, `Authoritative`, `Conversational`, `Friendly`, or `Technical`, `word_count` is a whole number, and `keywords` holds 3 to 6 entries. [prompts/brief.schema.json](prompts/brief.schema.json) states the same rules for the router, and `/seo-ingest` checks a generated brief against them with `jq`.
 
 `scripts/fill_prompt.sh` substitutes these into the templates' placeholders (`{{TOPIC}}`, `{{BRIEF}}`, `{{TONE}}`, `{{AUDIENCE}}`, `{{KEYWORDS}}`, `{{WORD_COUNT}}`, `{{CTA}}`, `{{FACTS}}`, plus `{{OUTLINE}}` and `{{SOURCE_TEXT}}`) and exits 1 if a template placeholder is left unfilled.
 
-`word_count` also sizes the outline: up to 1000 words gets 2–3 topic sections, up to 1800 gets 3–5, longer gets 4–6 (the table in [prompts/outline.md](prompts/outline.md), mirrored in `scripts/check.sh`).
+`word_count` also sizes the outline: up to 1000 words gets 2 to 3 topic sections, up to 1800 gets 3 to 5, and longer gets 4 to 6 (the table in [prompts/outline.md](prompts/outline.md), mirrored in `scripts/check.sh`).
 
 ## Section-by-section drafting
 
 `/seo-draft` runs `scripts/draft_sections.sh <brief.json>`, which turns the outline into parts and drafts each with its own call:
 
-- **Parts.** `00-intro` (no heading; the H1 is added at stitch time), then one part per H2 in outline order. The FAQ uses `prompts/section.md`; the Conclusion uses `prompts/conclusion.md`, which ends on the brief's CTA.
-- **Budget.** The draft aims at 135% of `word_count` because the rewrite pass and its re-verification cut 20–35% (`DRAFT_FACTOR` overrides). A lower factor for short pages left a thin-facts page 28% short, so the factor is the same at every length; a page that keeps some drafted text can overshoot, which only warns. Of that total: intro about 8%, conclusion about 6%, FAQ 60 words per question (at most 20%), and the rest split across topic sections by their H3 count. Each prompt asks for 90–110% of its budget.
+- **Parts.** `00-intro` (no heading, since the H1 is added at stitch time), then one part per H2 in outline order. The FAQ uses `prompts/section.md`, and the Conclusion uses `prompts/conclusion.md`, which ends on the brief's CTA.
+- **Budget.** The draft aims at 135% of `word_count` because the rewrite pass and its re-verification cut 20 to 35% (`DRAFT_FACTOR` overrides). A lower factor for short pages left a thin-facts page 28% short, so the factor is the same at every length. A page that keeps some drafted text can overshoot, which only warns. Of that total: intro about 8%, conclusion about 6%, FAQ 60 words per question (at most 20%), and the rest split across topic sections by their H3 count. Each prompt asks for 90 to 110% of its budget.
 - **Keywords.** Each primary keyword keeps its cue in only the first two parts that list it (the intro counts as one use of the first keyword), and the FAQ gets none, because the model stuffs cues into its questions.
-- **Repairs.** After each call the script puts the outline's heading wording back when the heading structure matches, and strips bold. Then `check.sh section` runs; a failure is retried once with seed 2, and a second failure is saved as `.ERROR.md` and stops the run.
-- **Fact verification.** Each passing part gets a second call (`prompts/verify.md`, schema-constrained, temperature 0.1) that lists sentences the facts do not support, typed `invented`, `strengthened`, or `contradiction`, each with a replacement. The script applies replacements as literal swaps and rejects any that is not found verbatim, touches the CTA sentence, brings in words absent from the sentence and the facts (compared by first four letters), or, for `strengthened`, drops over half the sentence. Everything is logged in `sections/NN-<heading>.verify.json`; the original text stays in `.unverified.md`, and is restored if the verified part fails its check. Rejected issues remain in the draft for review. `VERIFY_MODEL=gemma` runs the verifier on Gemma instead; on the About test page the two flagged nearly the same sentences at the same speed.
+- **Repairs.** After each call the script puts the outline's heading wording back when the heading structure matches, and strips bold. Then `check.sh section` runs. A failure is retried once with seed 2, and a second failure is saved as `.ERROR.md` and stops the run.
+- **Fact verification.** Each passing part gets a second call (`prompts/verify.md`, schema-constrained, temperature 0.1) that lists sentences the facts do not support, typed `invented`, `strengthened`, or `contradiction`, each with a replacement. The script applies replacements as literal swaps and rejects any that is not found verbatim, touches the CTA sentence, brings in words absent from the sentence and the facts (compared by first four letters), or, for `strengthened`, drops over half the sentence. Everything is logged in `sections/NN-<heading>.verify.json`. The original text stays in `.unverified.md`, and is restored if the verified part fails its check. Rejected issues remain in the draft for review. `VERIFY_MODEL=gemma` runs the verifier on Gemma instead. On the About test page the two flagged nearly the same sentences at the same speed.
 - **Resume.** Rerunning skips parts that exist and pass. Saved parts older than `outline.md` are discarded, as is everything with `--fresh`.
 
 Every part sees the brief's audience, tone, facts, and the outline's headings, so it knows what the other sections cover without repeating them.
@@ -143,7 +144,7 @@ Every part sees the brief's audience, tone, facts, and the outline's headings, s
 
 `/seo-rewrite` runs `scripts/rewrite_sections.sh <brief.json>` after `/seo-draft`. Each part is edited in order with `prompts/rewrite.md`: fix pasted keyword phrases, cut filler and sentences that repeat earlier parts, vary sentence openings, and fix the verifier's rejected issues for that part, which are passed in. Each call sees the parts already edited.
 
-The edit is checked against its input with `check.sh rewrite`: identical headings, 50–120% of the length (cutting filler shortens parts; growth is where new claims come from), no call to action added to a part that lacked it, no numbers absent from the input and the facts, no more absolute-wording sentences than before, and the CTA sentence kept. A failure is retried with seed 2; a second failure keeps the drafted part with a WARN, because the rewrite is polish and never blocks the article. Each accepted edit then goes through the same fact verification as the draft (`verify_part` in `scripts/lib_parts.sh`), logged as `rewrite/NN-<heading>.verify.json`, because an edit can reword a claim into one the facts do not support. `REWRITE_MODEL=gemma` switches the model.
+The edit is checked against its input with `check.sh rewrite`: identical headings, 50 to 120% of the length (cutting filler shortens parts, and growth is where new claims come from), no call to action added to a part that lacked it, no numbers absent from the input and the facts, no more absolute-wording sentences than before, and the CTA sentence kept. A failure is retried with seed 2, and a second failure keeps the drafted part with a WARN, because the rewrite is polish and never blocks the article. Each accepted edit then goes through the same fact verification as the draft (`verify_part` in `scripts/lib_parts.sh`), logged as `rewrite/NN-<heading>.verify.json`, because an edit can reword a claim into one the facts do not support. `REWRITE_MODEL=gemma` switches the model.
 
 ## Checks
 
@@ -153,8 +154,8 @@ The edit is checked against its input with `check.sh rewrite`: identical heading
 | --- | --- | --- |
 | `brief <brief.json> [source.txt]` | schema mismatch | CTA mentions on-page UI, single-word or page-name keywords, empty facts, fact numbers absent from the source |
 | `outline <outline.md> <brief.json>` | not exactly one H1, missing FAQ/Conclusion, any body text, an H2 without an Intent line | section or FAQ counts outside the size table, H3s under Conclusion, lowercase keyword pasted into a heading |
-| `section <part.md> <block.md or -> <words> <brief.json>` | headings differ from the block (or any heading in the intro), guidance lines or code fence left in, CTA missing from the conclusion | words outside 60–125% of the budget, bolded keyword |
-| `rewrite <new.md> <old.md> <brief.json>` | headings changed, length outside 50–120%, CTA added where there was none, numbers absent from the input and facts, more absolute-wording sentences, CTA sentence lost | bold left in |
+| `section <part.md> <block.md or -> <words> <brief.json>` | headings differ from the block (or any heading in the intro), guidance lines or code fence left in, CTA missing from the conclusion | words outside 60 to 125% of the budget, bolded keyword |
+| `rewrite <new.md> <old.md> <brief.json>` | headings changed, length outside 50 to 120%, CTA added where there was none, numbers absent from the input and facts, more absolute-wording sentences, CTA sentence lost | bold left in |
 | `draft <draft.md> <outline.md> <brief.json> [percent]` (`draft` for `draft.md`) | H1/H2 differ from the outline, outline guidance lines left in | length outside ±15%, CTA missing from Conclusion, a keyword used more than twice, bolded keywords, numbers not in the facts or outline, sentences with absolute wording (all, every, guaranteed…) |
 
 The checks catch structure and invented digits, not invented prose. The skills therefore also ask Claude Code to audit facts against the source (ingest) or the brief's `facts` (draft) and report anything added or strengthened.
@@ -176,7 +177,7 @@ orphan its outline.
 | `outputs/<slug>/outline.md` | `/seo-outline` | The outline, consumed by `/seo-draft` |
 | `outputs/<slug>/sections/NN-<heading>.block.md` | `/seo-draft` | One outline block per H2, keyword cues de-duplicated |
 | `outputs/<slug>/sections/NN-<heading>.prompt.txt` | `/seo-draft` | The filled prompt for that part (`00-intro` has no block) |
-| `outputs/<slug>/sections/NN-<heading>.md` | `/seo-draft` | The drafted part after verification; `.ERROR.md` when it failed twice |
+| `outputs/<slug>/sections/NN-<heading>.md` | `/seo-draft` | The drafted part after verification, or `.ERROR.md` when it failed twice |
 | `outputs/<slug>/sections/NN-<heading>.verify.json` | `/seo-draft` | Verifier findings, each marked `accepted` or with a `reject` reason |
 | `outputs/<slug>/sections/NN-<heading>.unverified.md` | `/seo-draft` | The part as drafted, before verification |
 | `outputs/<slug>/sections/NN-<heading>.verify.prompt.txt` | `/seo-draft` | The filled fact-check prompt |

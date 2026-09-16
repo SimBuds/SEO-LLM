@@ -1248,7 +1248,7 @@ repos, and one ended in a colon with no template after it.)
 - **Stack: Claude Code skills, bash, `jq`, and `curl`. Nothing else.** The
   pipeline is markdown skills in `.claude/skills/`, prompt files in `prompts/`,
   the model wrapper, and two helper scripts (`fill_prompt.sh` fills templates,
-  `check.sh` holds every structural check; added 2026-09-16 so skills stop
+  `check.sh` holds every structural check. Added 2026-09-16 so skills stop
   hand-rolling substitution and validation). No Python application, no web framework, no database,
   and no client library for the model. (Decided 2026-09-14. The earlier Python
   and Streamlit `seo-app` design is retired and stays recoverable from commit
@@ -1271,7 +1271,7 @@ repos, and one ended in a colon with no template after it.)
 - **Briefs are JSON, validated with `jq`.** `prompts/brief.schema.json`
   constrains what the router may return during ingest, and
   `scripts/check.sh brief` re-checks the saved file. A brief's `facts` list is
-  the only source of business specifics for the outline and draft; prompts
+  the only source of business specifics for the outline and draft, and prompts
   forbid inventing or strengthening them. (Added 2026-09-16 after drafts
   invented shipping, warranty, and founder details.) `yq` is not installed and is not a dependency.
   (Decided 2026-09-15: JSON plus schema-enforced output was chosen over
