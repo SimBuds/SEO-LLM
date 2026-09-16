@@ -1,20 +1,20 @@
 ---
 name: seo-draft
-description: Generate an SEO article draft from a YAML brief plus a pre-generated outline using the local llama.cpp router (model `qwen`). Phase 2 stage — one prompt, one model call, one markdown file, but now grounded in the outline produced by /seo-outline. Use when the user runs /seo-draft <brief.yaml> or asks for an article draft from a brief.
+description: Generate an SEO article draft from a JSON brief plus a pre-generated outline using the local llama.cpp router (model `qwen`). Phase 2 stage — one prompt, one model call, one markdown file, but now grounded in the outline produced by /seo-outline. Use when the user runs /seo-draft <brief.json> or asks for an article draft from a brief.
 ---
 
 # seo-draft
 
-Generate a draft SEO article from a YAML brief + outline via the llama.cpp router.
+Generate a draft SEO article from a JSON brief + outline via the llama.cpp router.
 
 ## Inputs
 
-- `$1` — path to a YAML brief (e.g. `briefs/example.yaml`). If missing, ask the user which brief to use.
+- `$1` — path to a JSON brief (e.g. `briefs/example.json`). If missing, ask the user which brief to use.
 
 ## Preconditions (check before generating)
 
 1. The llama.cpp router serves `qwen`: `curl -s localhost:8080/models | jq -er '.data[] | select(.id=="qwen") | .id'` prints `qwen`. If it prints nothing or exits non-zero, tell the user the router on `localhost:8080` is not serving `qwen` and stop.
-2. An outline exists at `outputs/<slug>/outline.md`. If missing, tell the user to run `/seo-outline <brief.yaml>` first and stop.
+2. An outline exists at `outputs/<slug>/outline.md`. If missing, tell the user to run `/seo-outline <brief.json>` first and stop.
 
 ## Steps
 

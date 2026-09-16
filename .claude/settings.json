@@ -6,7 +6,6 @@
       "Bash(./scripts/llm_call.sh:*)",
       "Bash(curl -s localhost:8080/models)",
       "Bash(jq:*)",
-      "Bash(yq:*)",
       "Bash(pandoc:*)",
       "Bash(pdftotext:*)"
     ]

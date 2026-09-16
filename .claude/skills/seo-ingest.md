@@ -1,11 +1,11 @@
 ---
 name: seo-ingest
-description: Extract a YAML brief from a source document (.docx, .pdf, .md, or .txt) using the local llama.cpp router (model `qwen`) so the user doesn't have to hand-write briefs. Phase 3 stage — sits before /seo-outline. Use when the user runs /seo-ingest <file> or supplies a doc/PDF instead of a YAML brief.
+description: Extract a JSON brief from a source document (.docx, .pdf, .md, or .txt) using the local llama.cpp router (model `qwen`) so the user doesn't have to hand-write briefs. Phase 3 stage — sits before /seo-outline. Use when the user runs /seo-ingest <file> or supplies a doc/PDF instead of a JSON brief.
 ---
 
 # seo-ingest
 
-Convert a source document into a `briefs/<slug>.yaml` brief that the rest of the pipeline can consume.
+Convert a source document into a `briefs/<slug>.json` brief that the rest of the pipeline can consume.
 
 ## Inputs
 
@@ -27,17 +27,19 @@ Convert a source document into a `briefs/<slug>.yaml` brief that the rest of the
 4. If the extracted text is empty or < 50 characters, stop and report the file likely has no text layer (PDFs may be scans — OCR is out of scope).
 5. Read `prompts/ingest.md`. Substitute `{{SOURCE_TEXT}}` with the extracted text. If the text exceeds ~24 000 characters, truncate to the first 24 000 and append `\n\n[... source truncated for ingest ...]\n` so the model sees a clear boundary.
 6. Write the filled prompt to `briefs/_ingest/<slug>.prompt.txt`.
-7. Run: `bash scripts/llm_call.sh briefs/_ingest/<slug>.prompt.txt 0.2 1`
-8. Save stdout to `briefs/<slug>.yaml`. If the model wrapped the YAML in a ```yaml fence anyway, strip the fences before saving.
-9. Validate with `yq '.' briefs/<slug>.yaml > /dev/null` and confirm every required key (`topic`, `target_audience`, `tone`, `word_count`, `keywords`, `cta`) is present.
-10. Report: source path, output brief path, the six extracted field values, and the instruction: *"Review/edit `briefs/<slug>.yaml`, then run `/seo-outline briefs/<slug>.yaml`."*
+7. Run: `bash scripts/llm_call.sh briefs/_ingest/<slug>.prompt.txt 0.2 1 prompts/brief.schema.json`. The schema argument makes the router return only a JSON object with the six brief keys.
+8. Save stdout to `briefs/<slug>.json` as-is. Schema-constrained output carries no code fences, so nothing is stripped.
+9. Validate: the following must exit 0. It checks exactly the six keys (`topic`, `target_audience`, `tone`, `word_count`, `keywords`, `cta`), non-empty strings, an integer `word_count`, and 3 to 6 non-empty keywords.
+   ```
+   jq -e '(keys == ["cta","keywords","target_audience","tone","topic","word_count"]) and all(.topic, .target_audience, .tone, .cta; type == "string" and length > 0) and (.word_count | type == "number" and . == floor and . >= 1) and (.keywords | type == "array" and length >= 3 and length <= 6 and all(.[]; type == "string" and length > 0))' briefs/<slug>.json
+   ```
+10. Report: source path, output brief path, the six extracted field values, and the instruction: *"Review/edit `briefs/<slug>.json`, then run `/seo-outline briefs/<slug>.json`."*
 
 ## Failure handling
 
 - Extractor fails (non-zero exit): surface stderr, stop.
-- YAML doesn't parse with `yq`: show the raw model output, ask whether to retry at temperature 0.1 or hand-fix.
-- A required key is missing or empty after parse: report which, ask whether to retry or hand-fill.
+- The step 9 check exits non-zero (the JSON does not parse, or a key is missing, empty, or the wrong type): show the raw model output and which condition failed, ask whether to retry at temperature 0.1 or hand-fix.
 
 ## Out of scope
 
-No OCR for scanned PDFs. No outline, draft, rewrite, or metadata — those are downstream skills. The user is expected to review the generated YAML before running `/seo-outline`.
+No OCR for scanned PDFs. No outline, draft, rewrite, or metadata — those are downstream skills. The user is expected to review the generated JSON before running `/seo-outline`.

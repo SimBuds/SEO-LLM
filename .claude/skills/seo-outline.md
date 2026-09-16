@@ -1,15 +1,15 @@
 ---
 name: seo-outline
-description: Generate an SEO article outline (H1 + H2/H3 + intent notes + FAQ) from a YAML brief using the local llama.cpp router (model `qwen`). Phase 2 stage — outline only, no drafting. Use when the user runs /seo-outline <brief.yaml> or asks for an article outline from a brief.
+description: Generate an SEO article outline (H1 + H2/H3 + intent notes + FAQ) from a JSON brief using the local llama.cpp router (model `qwen`). Phase 2 stage — outline only, no drafting. Use when the user runs /seo-outline <brief.json> or asks for an article outline from a brief.
 ---
 
 # seo-outline
 
-Generate a structured article outline from a YAML brief via the llama.cpp router. The outline is consumed by `/seo-draft` in the next stage.
+Generate a structured article outline from a JSON brief via the llama.cpp router. The outline is consumed by `/seo-draft` in the next stage.
 
 ## Inputs
 
-- `$1` — path to a YAML brief (e.g. `briefs/example.yaml`). If missing, ask the user which brief to use.
+- `$1` — path to a JSON brief (e.g. `briefs/example.json`). If missing, ask the user which brief to use.
 
 ## Preconditions
 

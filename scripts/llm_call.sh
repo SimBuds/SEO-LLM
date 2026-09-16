@@ -4,6 +4,7 @@
 # Sends prompts/system.md as the system message on every call: router models
 # carry no built-in system prompt, so a call without one gets the bare model.
 # With a schema file, the router constrains the reply to that JSON schema.
+# Reads the router's served context size first and refuses to call below MIN_CTX.
 # Prints the reply to stdout. Exits non-zero on HTTP error or an empty reply.
 
 set -euo pipefail
@@ -17,6 +18,7 @@ SEED="${3:-0}"
 SCHEMA_FILE="${4:-}"
 HOST="${LLM_HOST:-http://localhost:8080}"
 MODEL="${LLM_MODEL:-qwen}"
+MIN_CTX=32768
 
 [[ -r "$PROMPT_FILE" ]] || { echo "prompt file not readable: $PROMPT_FILE" >&2; exit 2; }
 [[ -r "$SYSTEM_FILE" ]] || { echo "system prompt not readable: $SYSTEM_FILE" >&2; exit 2; }
@@ -31,9 +33,28 @@ if [[ -n "$SCHEMA_FILE" ]]; then
   SCHEMA_ARGS=(--slurpfile schema "$SCHEMA_FILE" --arg schema_name "$(basename "$SCHEMA_FILE" .schema.json)")
 fi
 
+# Context is fixed at load time by the router's preset, so it is read here and
+# checked before any work: a preset deployed below MIN_CTX would otherwise
+# shrink the budget silently. An unloaded model has no .meta, but its
+# status.args still carry --ctx-size, so this never forces a model load.
+MODELS_JSON=$(curl -sS --fail-with-body "$HOST/models") \
+  || { rc=$?; echo "$MODELS_JSON" >&2; echo "cannot read $HOST/models to check context size" >&2; exit "$rc"; }
+
+SERVED_CTX=$(jq -er --arg m "$MODEL" '
+  ([.data[]? | select(.id == $m)][0] // error("model not served by the router: " + $m)) as $e
+  | ($e.status.args // []) as $args
+  | ($e.meta.n_ctx // ($args | index("--ctx-size") as $i | if $i == null then null else $args[$i + 1] end))
+  | if . == null then error("no context size in the /models entry for " + $m) else (tonumber | floor) end
+' <<< "$MODELS_JSON")
+
+if (( SERVED_CTX < MIN_CTX )); then
+  echo "router serves $SERVED_CTX tokens of context for $MODEL, below the $MIN_CTX this app needs" >&2
+  exit 3
+fi
+
 # Sampling pinned in-repo rather than inherited from the router preset.
-# Values match Local-LLM build-qwen PARAMS as of 2026-09-14. Context is fixed
-# at 32768 by the preset (no per-request override); overflow returns HTTP 400.
+# Values match Local-LLM build-qwen PARAMS as of 2026-09-14. There is no
+# per-request context override; an oversized prompt returns HTTP 400.
 PAYLOAD=$(jq -n \
   --arg model "$MODEL" \
   --rawfile system "$SYSTEM_FILE" \
