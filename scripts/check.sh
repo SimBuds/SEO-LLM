@@ -5,8 +5,8 @@
 #   check.sh brief   <brief.json> [source.txt]
 #   check.sh outline <outline.md> <brief.json>
 #   check.sh section <part.md> <outline-block.md or -> <word-budget> <brief.json>
-#   check.sh draft   <draft.md> <outline.md> <brief.json> [target-percent]
-#                    (target-percent defaults to 100; pass DRAFT_FACTOR, 135, for draft.md)
+#   check.sh draft   <draft.md> <outline.md> <brief.json> [target-percent|draft]
+#                    (defaults to 100; "draft" uses draft_factor, the aim of draft.md)
 #   check.sh rewrite <new-part.md> <old-part.md> <brief.json>
 # Prints "FAIL: ..." for problems that must be fixed or regenerated and
 # "WARN: ..." for problems a human should look at. Exits 1 on any FAIL, else 0.
@@ -23,8 +23,7 @@ warn() { echo "WARN: $*"; }
 # Ordered-list markers ("1. ") are dropped first: they are not claims.
 numbers() { sed -E 's/^[[:space:]]*[0-9]+\.[[:space:]]//' | grep -oE '[0-9][0-9,.]*' | sed -E 's/,//g; s/\.+$//' | sort -u || true; }
 
-# Sentences with absolute wording. draft_sections.sh keeps its own copy in sync.
-ABSOLUTE_SENTENCE='[^.!?]*\b(all|every|always|never|guarantee[sd]?|any circumstances|complete control|entirely|without compromise)\b[^.!?]*[.!?]'
+source "$(dirname "${BASH_SOURCE[0]}")/lib_parts.sh"
 absolutes() { grep -v '^#' "$1" | grep -oiE "$ABSOLUTE_SENTENCE" || true; }
 
 brief_valid() {
@@ -139,7 +138,8 @@ draft)
     || fail "H1/H2 headings differ from the outline"
   grep -qE '^(_Intent: |Keywords: )' "$DRAFT" && fail "outline guidance lines left in the draft"
   grep -qxF '```' "$DRAFT" && warn "draft contains a code fence"
-  WC=$(( $(jq .word_count "$BRIEF") * ${4:-100} / 100 )); WORDS=$(wc -w < "$DRAFT")
+  PCT="${4:-100}"; [[ "$PCT" == draft ]] && PCT=$(draft_factor "$(jq .word_count "$BRIEF")")
+  WC=$(( $(jq .word_count "$BRIEF") * PCT / 100 )); WORDS=$(wc -w < "$DRAFT")
   LO=$((WC * 85 / 100)); HI=$((WC * 115 / 100))
   (( WORDS >= LO && WORDS <= HI )) || warn "$WORDS words; target $WC (accepted $LO-$HI)"
   CTA=$(jq -r .cta "$BRIEF")

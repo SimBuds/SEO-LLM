@@ -44,7 +44,8 @@ SEO-LLM/
 │   ├── llm_call.sh     # curl wrapper: prompt-file + prompts/system.md → reply on stdout
 │   ├── fill_prompt.sh  # fills a template's {{PLACEHOLDERS}} from a brief, outline, or source text
 │   ├── draft_sections.sh # section-by-section drafting loop: split, budget, call, verify, check, retry, stitch
-│   ├── rewrite_sections.sh # per-part readability edit with guards, stitched into final.md
+│   ├── rewrite_sections.sh # per-part readability edit with guards and re-verification, stitched into final.md
+│   ├── lib_parts.sh      # shared helpers: fact verification, heading restore, unbold, draft_factor
 │   └── check.sh        # deterministic checks on a brief, outline, or draft (FAIL/WARN lines)
 ├── briefs/             # user inputs (JSON)
 ├── outputs/            # generated articles, one directory per brief (gitignored)
@@ -130,7 +131,7 @@ All seven keys are required. `facts` lists the business specifics (names, prices
 `/seo-draft` runs `scripts/draft_sections.sh <brief.json>`, which turns the outline into parts and drafts each with its own call:
 
 - **Parts.** `00-intro` (no heading; the H1 is added at stitch time), then one part per H2 in outline order. The FAQ uses `prompts/section.md`; the Conclusion uses `prompts/conclusion.md`, which ends on the brief's CTA.
-- **Budget.** The draft aims at `DRAFT_FACTOR` percent of `word_count` (default 135), because the rewrite pass cuts filler and lands near 70% of the draft. Of that total: intro about 8%, conclusion about 6%, FAQ 60 words per question (at most 20%), and the rest split across topic sections by their H3 count. Each prompt asks for 90–110% of its budget.
+- **Budget.** The draft aims at 135% of `word_count` because the rewrite pass and its re-verification cut 20–35% (`DRAFT_FACTOR` overrides). A lower factor for short pages left a thin-facts page 28% short, so the factor is the same at every length; a page that keeps some drafted text can overshoot, which only warns. Of that total: intro about 8%, conclusion about 6%, FAQ 60 words per question (at most 20%), and the rest split across topic sections by their H3 count. Each prompt asks for 90–110% of its budget.
 - **Keywords.** Each primary keyword keeps its cue in only the first two parts that list it (the intro counts as one use of the first keyword), and the FAQ gets none, because the model stuffs cues into its questions.
 - **Repairs.** After each call the script puts the outline's heading wording back when the heading structure matches, and strips bold. Then `check.sh section` runs; a failure is retried once with seed 2, and a second failure is saved as `.ERROR.md` and stops the run.
 - **Fact verification.** Each passing part gets a second call (`prompts/verify.md`, schema-constrained, temperature 0.1) that lists sentences the facts do not support, typed `invented`, `strengthened`, or `contradiction`, each with a replacement. The script applies replacements as literal swaps and rejects any that is not found verbatim, touches the CTA sentence, brings in words absent from the sentence and the facts (compared by first four letters), or, for `strengthened`, drops over half the sentence. Everything is logged in `sections/NN-<heading>.verify.json`; the original text stays in `.unverified.md`, and is restored if the verified part fails its check. Rejected issues remain in the draft for review. `VERIFY_MODEL=gemma` runs the verifier on Gemma instead; on the About test page the two flagged nearly the same sentences at the same speed.
@@ -142,7 +143,7 @@ Every part sees the brief's audience, tone, facts, and the outline's headings, s
 
 `/seo-rewrite` runs `scripts/rewrite_sections.sh <brief.json>` after `/seo-draft`. Each part is edited in order with `prompts/rewrite.md`: fix pasted keyword phrases, cut filler and sentences that repeat earlier parts, vary sentence openings, and fix the verifier's rejected issues for that part, which are passed in. Each call sees the parts already edited.
 
-The edit is checked against its input with `check.sh rewrite`: identical headings, 50–120% of the length (cutting filler shortens parts; growth is where new claims come from), no call to action added to a part that lacked it, no numbers absent from the input and the facts, no more absolute-wording sentences than before, and the CTA sentence kept. A failure is retried with seed 2; a second failure keeps the drafted part with a WARN, because the rewrite is polish and never blocks the article. `REWRITE_MODEL=gemma` switches the model.
+The edit is checked against its input with `check.sh rewrite`: identical headings, 50–120% of the length (cutting filler shortens parts; growth is where new claims come from), no call to action added to a part that lacked it, no numbers absent from the input and the facts, no more absolute-wording sentences than before, and the CTA sentence kept. A failure is retried with seed 2; a second failure keeps the drafted part with a WARN, because the rewrite is polish and never blocks the article. Each accepted edit then goes through the same fact verification as the draft (`verify_part` in `scripts/lib_parts.sh`), logged as `rewrite/NN-<heading>.verify.json`, because an edit can reword a claim into one the facts do not support. `REWRITE_MODEL=gemma` switches the model.
 
 ## Checks
 
@@ -154,7 +155,7 @@ The edit is checked against its input with `check.sh rewrite`: identical heading
 | `outline <outline.md> <brief.json>` | not exactly one H1, missing FAQ/Conclusion, any body text, an H2 without an Intent line | section or FAQ counts outside the size table, H3s under Conclusion, lowercase keyword pasted into a heading |
 | `section <part.md> <block.md or -> <words> <brief.json>` | headings differ from the block (or any heading in the intro), guidance lines or code fence left in, CTA missing from the conclusion | words outside 60–125% of the budget, bolded keyword |
 | `rewrite <new.md> <old.md> <brief.json>` | headings changed, length outside 50–120%, CTA added where there was none, numbers absent from the input and facts, more absolute-wording sentences, CTA sentence lost | bold left in |
-| `draft <draft.md> <outline.md> <brief.json> [percent]` (135 for `draft.md`) | H1/H2 differ from the outline, outline guidance lines left in | length outside ±15%, CTA missing from Conclusion, a keyword used more than twice, bolded keywords, numbers not in the facts or outline, sentences with absolute wording (all, every, guaranteed…) |
+| `draft <draft.md> <outline.md> <brief.json> [percent]` (`draft` for `draft.md`) | H1/H2 differ from the outline, outline guidance lines left in | length outside ±15%, CTA missing from Conclusion, a keyword used more than twice, bolded keywords, numbers not in the facts or outline, sentences with absolute wording (all, every, guaranteed…) |
 
 The checks catch structure and invented digits, not invented prose. The skills therefore also ask Claude Code to audit facts against the source (ingest) or the brief's `facts` (draft) and report anything added or strengthened.
 

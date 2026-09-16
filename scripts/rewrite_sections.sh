@@ -11,7 +11,9 @@
 # headings, similar length, no new numbers, no new absolute wording, CTA kept)
 # and retried once with seed 2. A part that fails twice keeps its unedited
 # text, with a WARN; the rewrite is polish, so it never stops the run.
-# REWRITE_MODEL picks the model (default qwen). Re-running skips parts whose
+# Every edited part then gets the same fact-verification call as the draft
+# (verify_part in lib_parts.sh), because an edit can reintroduce or reword a
+# claim. REWRITE_MODEL picks the model (default qwen). Re-running skips parts whose
 # edit is newer than its input and passes; --fresh redoes every part.
 
 set -euo pipefail
@@ -20,7 +22,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BRIEF="${1:?brief required}"
 FRESH="${2:-}"
 MODEL="${REWRITE_MODEL:-qwen}"
+VERIFY_MODEL="${VERIFY_MODEL:-qwen}"
 TEMPERATURE=0.7
+source "$ROOT/scripts/lib_parts.sh"
 
 SLUG=$(basename "$BRIEF" .json)
 OUT="$ROOT/outputs/$SLUG"
@@ -45,7 +49,9 @@ for name in "${PARTS[@]}"; do
   check=(bash "$ROOT/scripts/check.sh" rewrite "$out" "$in" "$BRIEF")
   if [[ -s "$out" && "$out" -nt "$in" ]] && "${check[@]}" > /dev/null; then
     echo "skip $name (edited, passes)"
+    verify_part "$name" "$out" "$RW" "$in" "${check[@]}"
   else
+    rm -f "$RW/$name.verify.json" "$RW/$name.unverified.md" "$RW/$name".rejected-seed*.md
     problems="(none)"
     if [[ -s "$SEC/$name.verify.json" ]]; then
       p=$(jq -r '.issues[]? | select(.accepted == false and .found) | "- \"\(.sentence)\" — \(.problem)"' "$SEC/$name.verify.json")
@@ -61,14 +67,18 @@ for name in "${PARTS[@]}"; do
           bash "$ROOT/scripts/llm_call.sh" "$prompt" "$TEMPERATURE" "$seed" > "$out"; then
         echo "WARN: $name rewrite call failed (seed $seed)" >&2; continue
       fi
-      sed -i -E '/^#/!s/\*\*([^*]+)\*\*/\1/g' "$out"
+      restore_headings "$in" "$out"
+      unbold "$out"
       if "${check[@]}"; then ok=1; break; fi
       cp "$out" "$RW/$name.rejected-seed$seed.md"
     done
     if (( ok )); then
       echo "ok   $name ($MODEL, $(grep -v '^#' "$in" | wc -w) -> $(grep -v '^#' "$out" | wc -w) words, seed $seed)"
+      verify_part "$name" "$out" "$RW" "$in" "${check[@]}"
     else
       cp "$in" "$out"
+      # The drafted text was verified already; record that instead of re-checking.
+      echo '{"issues": [], "skipped": "kept drafted text, verified in sections/"}' > "$RW/$name.verify.json"
       echo "WARN: $name kept its unedited text; the rewrite failed its check twice" >&2
     fi
   fi
