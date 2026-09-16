@@ -7,8 +7,8 @@
 A local-first SEO content pipeline driven by **Claude Code (CC) as the runtime orchestrator** and a **llama.cpp router** as the local model runtime. There is no standalone Python app. CC's skills, prompts, and the Bash tool sequence the work, and a single shell helper posts to the router's OpenAI-compatible HTTP API.
 
 Models are served by the llama.cpp router on `localhost:8080`, which runs as the `llama-server` systemd user service. Its presets (`gemma`, `qwen`, `lite`) are built and deployed from `~/Apps/Local-LLM`, and this repo only consumes them:
-- `qwen`: outlining, structured outputs, metadata, drafting
-- Rewrite / humanization: model chosen when that phase is planned
+- `qwen`: ingest, outlining, drafting, fact verification, rewrite, and (planned) metadata
+- `gemma`: optional verifier and rewrite model (`VERIFY_MODEL`, `REWRITE_MODEL`). Qwen stayed the default after A/B runs on the three test briefs (2026-09-16).
 
 The router keeps one model loaded at a time (`--models-max 1`) to respect a low-VRAM budget (currently a 10 GB RTX 3080, with `qwen`'s MoE layers offloaded to system RAM). If `curl -s localhost:8080/models` does not list `qwen`, fix the router in Local-LLM before running the pipeline.
 
@@ -29,16 +29,19 @@ Router models carry no built-in system prompt. The wrapper sends `prompts/system
 
 ## Architecture
 
+Built (one skill per stage, run in order):
+
 ```
 User in Claude Code
-  └─ /seo-generate briefs/<brief>.json
-       └─ skill reads brief + prompts/*.md
-            ├─ Bash: scripts/llm_call.sh prompts/outline.md                  → outline.md
-            ├─ Bash: per-section call (qwen, prompts/section.md)            → sections/*.md
-            ├─ Bash: per-section rewrite (REWRITE_MODEL, prompts/rewrite.md) → rewrite/, final.md
-            ├─ Bash: metadata + keywords pass (qwen)                        → meta.json
-            └─ Write outputs/<slug>/final.md
+  ├─ /seo-ingest  <file>   pdftotext/pandoc + prompts/ingest.md (schema)      → briefs/<slug>.json
+  ├─ /seo-outline <brief>  prompts/outline.md                                → outline.md
+  ├─ /seo-draft   <brief>  scripts/draft_sections.sh: per-part call
+  │                        (intro/section/conclusion.md) + verify.md          → sections/*, draft.md
+  └─ /seo-rewrite <brief>  scripts/rewrite_sections.sh: per-part rewrite.md
+                           (REWRITE_MODEL) + verify.md                        → rewrite/*, final.md
 ```
+
+Planned (Phases 6 and 7): a metadata and keywords pass (qwen) writing `meta.json`, and a `/seo-generate` skill that runs outline through metadata in one command.
 
 No Python app. No workflow engine. No SQLite.
 
@@ -50,27 +53,35 @@ No Python app. No workflow engine. No SQLite.
 SEO-LLM/
 ├── .claude/
 │   ├── skills/              # <name>/SKILL.md per command. Built: /seo-ingest, /seo-outline, /seo-draft, /seo-rewrite. Planned: /seo-metadata, /seo-keywords, /seo-generate
-│   └── settings.json        # allow the three scripts, jq, extractors, and Bash(curl -s localhost:8080/models)
+│   └── settings.json        # allow the five entry scripts, jq, extractors, and Bash(curl -s localhost:8080/models)
 ├── prompts/
 │   ├── system.md            # system message sent on every model call
-│   ├── system/              # SEO standards, anti-generic rules, tone, EEAT
+│   ├── brief.schema.json    # ingest output schema
+│   ├── ingest.md
 │   ├── outline.md
-│   ├── section.md
 │   ├── intro.md
+│   ├── section.md           # each topic H2 and the FAQ
 │   ├── conclusion.md
+│   ├── verify.md            # fact check, with verify.schema.json
 │   ├── rewrite.md
-│   ├── metadata.md
-│   └── keywords.md
+│   ├── system/              # planned (Phase 7): SEO standards, anti-generic rules, tone, EEAT
+│   ├── metadata.md          # planned (Phase 6)
+│   └── keywords.md          # planned (Phase 6)
 ├── scripts/
-│   ├── llm_call.sh          # curl wrapper: prompt-file (+ optional temp/seed) + prompts/system.md → stdout
+│   ├── llm_call.sh          # curl wrapper: prompt-file (+ optional temp/seed/schema) + prompts/system.md → stdout
 │   ├── fill_prompt.sh       # {{PLACEHOLDER}} filling from brief / outline / source text
-│   └── check.sh             # FAIL/WARN checks for brief, outline, draft
+│   ├── draft_sections.sh    # per-part drafting loop with fact check, retry, stitch
+│   ├── rewrite_sections.sh  # per-part rewrite loop with guards and fact check
+│   ├── lib_parts.sh         # shared helpers: verify_part, heading restore, unbold, draft_factor
+│   └── check.sh             # FAIL/WARN checks for brief, outline, section, rewrite, draft
 ├── briefs/                  # JSON inputs
-├── outputs/                 # <brief-slug>/{outline.md, sections/, final.md, meta.json}
+├── outputs/                 # <brief-slug>/{outline.md, sections/, draft.md, rewrite/, final.md}
 ├── docs/
-│   └── google/              # helpful-content.md, eeat.md, semantic-search.md, ai-content-guidelines.md
+│   └── google/              # planned (Phase 7): helpful-content.md, eeat.md, semantic-search.md, ai-content-guidelines.md
 ├── AGENTS.md
-└── PLAN.md
+├── Instructions.md          # stage-by-stage walk through the pipeline
+├── PLAN.md
+└── README.md
 ```
 
 ---
@@ -123,6 +134,8 @@ Context is not a per-stage knob. Each router preset fixes it per model (65536 fo
 ### Failure handling
 
 - If a per-section check fails, `scripts/draft_sections.sh` retries once with seed 2, then writes `sections/NN-<heading>.ERROR.md` and stops. An HTTP error or empty reply stops it at once. Re-running skips sections that already exist and pass.
+- A fact-check call that fails or times out leaves the part unverified with a WARN. Re-running retries it.
+- If a rewrite fails its check twice, `scripts/rewrite_sections.sh` keeps the drafted part with a WARN and carries on, because the rewrite is polish and never blocks the article.
 
 ---
 
@@ -133,13 +146,14 @@ outputs/<brief-slug>/
 ├── outline.md
 ├── draft.md
 ├── sections/
-│   ├── 00-intro.md
-│   ├── 01-<heading-slug>.{block.md,prompt.txt,md}
-│   └── ...
-├── humanized/
-│   └── 01-<heading-slug>.md
+│   ├── 00-intro.{prompt.txt,md,verify.json,verify.prompt.txt,unverified.md}
+│   ├── 01-<heading-slug>.{block.md,prompt.txt,md,verify.json,verify.prompt.txt,unverified.md}
+│   └── ...                  # NN-<heading-slug>.ERROR.md when a part fails twice
+├── rewrite/
+│   ├── 01-<heading-slug>.{prompt.txt,md,verify.json,verify.prompt.txt,unverified.md}
+│   └── ...                  # NN-<heading-slug>.rejected-seedN.md for failed edits
 ├── final.md
-└── meta.json
+└── meta.json                # planned (Phase 6)
 ```
 
 ---
@@ -149,7 +163,7 @@ outputs/<brief-slug>/
 1. The `llama-server` user service is running (`systemctl --user is-active llama-server` prints `active`). It is installed and configured from `~/Apps/Local-LLM`.
 2. The `qwen` preset is deployed there (`make deploy` in Local-LLM, then a service restart, both run by the owner of that repo).
 3. Verify: `curl -s localhost:8080/models | jq -er '.data[] | select(.id=="qwen") | .id'` prints `qwen`.
-4. Open this repo in Claude Code; run `/seo-draft briefs/example.json`.
+4. Open this repo in Claude Code and run `/seo-outline briefs/example.json`, then `/seo-draft` and `/seo-rewrite` on the same brief.
 
 ---
 

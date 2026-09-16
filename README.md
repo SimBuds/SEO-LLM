@@ -11,20 +11,19 @@ User in Claude Code
   ├─ /seo-outline briefs/<brief>.json        (Phase 2 — outline first)
   │    └─ scripts/llm_call.sh prompts/outline.md
   │         └─ writes outputs/<slug>/outline.md
-  └─ /seo-draft   briefs/<brief>.json        (Phase 4 — draft section by section)
-       └─ scripts/draft_sections.sh: one scripts/llm_call.sh call per part
-            prompts/intro.md, prompts/section.md (each H2 + FAQ), prompts/conclusion.md
-            └─ writes outputs/<slug>/sections/*.md, stitched into draft.md
+  ├─ /seo-draft   briefs/<brief>.json        (Phase 4 — draft section by section)
+  │    └─ scripts/draft_sections.sh: one scripts/llm_call.sh call per part, then a fact-check call
+  │         prompts/intro.md, prompts/section.md (each H2 + FAQ), prompts/conclusion.md, prompts/verify.md
+  │         └─ writes outputs/<slug>/sections/*.md, stitched into draft.md
   └─ /seo-rewrite briefs/<brief>.json        (Phase 5 — edit for readability)
-       └─ scripts/rewrite_sections.sh: one call per part, prompts/rewrite.md
+       └─ scripts/rewrite_sections.sh: one call per part, prompts/rewrite.md, then a fact-check call
             └─ writes outputs/<slug>/rewrite/*.md, stitched into final.md
 
 Every scripts/llm_call.sh call → POST localhost:8080/v1/chat/completions
   model qwen, system message prompts/system.md, thinking off
-            └─ writes outputs/<slug>/draft.md
 ```
 
-Later phases add section-by-section drafting, a humanization rewrite pass (model chosen when that phase is planned), metadata/keywords, and an SEO knowledge base. See [PLAN.md](PLAN.md) for the full phase breakdown.
+Phases 1 to 5 are built. Later phases add metadata and keywords (`meta.json`), a single `/seo-generate` command, and an SEO knowledge base. See [PLAN.md](PLAN.md) for the full phase breakdown, and [Instructions.md](Instructions.md) for a step-by-step walk through every stage.
 
 ### Why this shape
 - **CC is the harness.** Skills replace a CLI; the Bash tool replaces a workflow engine; files replace a database.
@@ -38,7 +37,7 @@ Later phases add section-by-section drafting, a humanization rewrite pass (model
 SEO-LLM/
 ├── .claude/
 │   ├── skills/         # one directory per slash command, each holding SKILL.md
-│   └── settings.json   # Bash allow-list: the three scripts, the router model check, jq, doc extractors
+│   └── settings.json   # Bash allow-list: the five entry scripts, the router model check, jq, doc extractors
 ├── prompts/            # markdown prompt templates with {{PLACEHOLDERS}}, plus system.md (sent on every call)
 ├── scripts/
 │   ├── llm_call.sh     # curl wrapper: prompt-file + prompts/system.md → reply on stdout
@@ -50,6 +49,7 @@ SEO-LLM/
 ├── briefs/             # user inputs (JSON)
 ├── outputs/            # generated articles, one directory per brief (gitignored)
 ├── AGENTS.md           # workflow contract for any AI agent in this repo
+├── Instructions.md     # stage-by-stage walk through the whole pipeline
 ├── PLAN.md             # architecture + phased MVP plan
 └── README.md
 ```
@@ -76,8 +76,8 @@ SEO-LLM/
    curl -s localhost:8080/models | jq -er '.data[] | select(.id=="qwen") | .id'
    ```
 2. Open this repo in Claude Code and accept the trust dialog on first run.
-   Confirm the three commands are available by typing `/` and looking for
-   `seo-ingest`, `seo-outline`, and `seo-draft`.
+   Confirm the four commands are available by typing `/` and looking for
+   `seo-ingest`, `seo-outline`, `seo-draft`, and `seo-rewrite`.
 3. Get a brief into `briefs/`, either way:
    - **From a JSON brief you write.** Copy [briefs/example.json](briefs/example.json) and edit it.
    - **From a document.** Run `/seo-ingest path/to/source.{docx,pdf,md,txt}`, which writes `briefs/<slug>.json` for you to review and edit.
@@ -179,15 +179,19 @@ orphan its outline.
 | `outputs/<slug>/sections/NN-<heading>.md` | `/seo-draft` | The drafted part after verification; `.ERROR.md` when it failed twice |
 | `outputs/<slug>/sections/NN-<heading>.verify.json` | `/seo-draft` | Verifier findings, each marked `accepted` or with a `reject` reason |
 | `outputs/<slug>/sections/NN-<heading>.unverified.md` | `/seo-draft` | The part as drafted, before verification |
+| `outputs/<slug>/sections/NN-<heading>.verify.prompt.txt` | `/seo-draft` | The filled fact-check prompt |
 | `outputs/<slug>/draft.md` | `/seo-draft` | The stitched article draft |
 | `outputs/<slug>/rewrite/NN-<heading>.{prompt.txt,md}` | `/seo-rewrite` | Each part's edit prompt and edited text (the drafted text when the edit failed twice) |
+| `outputs/<slug>/rewrite/NN-<heading>.{verify.json,verify.prompt.txt,unverified.md}` | `/seo-rewrite` | The fact check of an accepted edit, as in `sections/` |
+| `outputs/<slug>/rewrite/NN-<heading>.rejected-seedN.md` | `/seo-rewrite` | An edit that failed `check.sh rewrite`, kept for inspection |
 | `outputs/<slug>/final.md` | `/seo-rewrite` | The stitched, edited article |
 
 `outputs/` and `briefs/_ingest/` are gitignored. The `_`-prefixed prompt files are
 kept on purpose: when a result looks wrong, they show exactly what the model was
 asked. Each stage pins its own sampling: ingest runs at temperature 0.2 seed 1,
-outline at 0.3 seed 1, and each draft section at 0.5 seed 1. A failed check is retried with
-seed 2, because the same seed usually repeats the same output.
+outline at 0.3 seed 1, each draft section at 0.5 seed 1, each fact check at 0.1 seed 1,
+and each rewrite at 0.7 seed 1. A failed check is retried with seed 2, because the
+same seed usually repeats the same output.
 
 ## Running without Claude Code
 
@@ -207,7 +211,9 @@ bash scripts/fill_prompt.sh prompts/outline.md --brief briefs/example.json > out
 bash scripts/llm_call.sh outputs/example/_outline_prompt.txt 0.3 1 > outputs/example/outline.md
 bash scripts/check.sh outline outputs/example/outline.md briefs/example.json
 bash scripts/draft_sections.sh briefs/example.json
-bash scripts/check.sh draft outputs/example/draft.md outputs/example/outline.md briefs/example.json
+bash scripts/check.sh draft outputs/example/draft.md outputs/example/outline.md briefs/example.json draft
+bash scripts/rewrite_sections.sh briefs/example.json
+bash scripts/check.sh draft outputs/example/final.md outputs/example/outline.md briefs/example.json
 
 # 3. Check a brief against the schema the way /seo-ingest does.
 bash scripts/check.sh brief briefs/example.json
@@ -252,7 +258,7 @@ Other things worth knowing:
 
 ## Working in this repo
 
-[AGENTS.md](AGENTS.md) is the source of truth for how work happens here. Read it before making changes. The other pillars are [PLAN.md](PLAN.md) (architecture and the phased MVP plan) and this README (user-facing and developer-facing).
+[AGENTS.md](AGENTS.md) is the source of truth for how work happens here. Read it before making changes. The other pillars are [PLAN.md](PLAN.md) (architecture and the phased MVP plan) and this README (user-facing and developer-facing). [Instructions.md](Instructions.md) is a companion walk-through of the pipeline and must change with it.
 
 The fourth pillar, `IMPLEMENT.md`, is the execution tracker and holds the live state: which phase is active, what is done, what is deferred. It is untracked and gitignored on purpose, so a fresh clone has none. Its absence means no work is in flight, not that state was lost. Create it from the skeleton in `AGENTS.md` when you start a phase.
 
