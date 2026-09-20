@@ -18,7 +18,7 @@ marked **[verify]**.
 ## Table of Contents
 1. [SEO 101: Search Engine Optimization Fundamentals](#1-seo-101-search-engine-optimization-fundamentals)
 2. [Module 0: Measurement and Tooling Setup](#2-module-0-measurement-and-tooling-setup)
-3. [Module 1: Keyword Research & Search Intent Strategy](#3-module-1-keyword-research--search-intent-strategy)
+3. [Module 1: Keyword Research and Search Intent](#3-module-1-keyword-research-and-search-intent)
 4. [Module 2: On-Page SEO & Content Optimization](#4-module-2-on-page-seo--content-optimization)
 5. [Module 3: Link Building & Off-Page SEO Strategies](#5-module-3-link-building--off-page-seo-strategies)
 6. [Module 4: Technical SEO, Auditing, and Site Maintenance](#6-module-4-technical-seo-auditing-and-site-maintenance)
@@ -159,17 +159,55 @@ and every later decision becomes an opinion.
 * **Confirm it actually records** a session, a page view and a conversion event, by triggering one yourself and finding it in the reports. An analytics tag that fires on only half the templates is worse than none, because the numbers look real.
 * **Define conversions first.** Traffic is not the goal. Decide what a valuable session looks like (a form submission, a call, a booking, a purchase) and record that as an event, otherwise SEO reporting collapses into vanity metrics.
 
-### Search Engine Webmaster Tools
+### Google Search Console
 
-* **Google Search Console** is the only source of Google's own data about your site: which queries produced impressions and clicks, which pages are indexed and which are excluded and why, and which structured data it recognized. Verify the property, submit the sitemap, and confirm the index coverage report has no unexpected exclusions.
-* **Bing Webmaster Tools** covers Bing and, by extension, several AI answer products that draw on its index. It also offers **IndexNow**, a push protocol that reports new and changed URLs instead of waiting for a crawl.
-* Both are free, and both hold data no third-party tool can reconstruct. Register at the start, because neither backfills history from before verification.
+This is the most important account in SEO, and the one this pipeline is built
+around. It is Google reporting what actually happened, not a vendor's model of
+what might be happening.
+
+What it gives you that nothing else can:
+
+* **Queries with impressions, clicks, click-through rate and average position**, for your site, measured. Not estimated volume for a keyword in general, but the real demand that reached your pages.
+* **Index coverage**, page by page, with the specific reason anything is excluded.
+* **URL inspection**, showing what Google last fetched, how it rendered and which canonical it chose.
+* **Core Web Vitals field data** from real visitors, and any structured data it recognized.
+
+Verify the property, submit the sitemap, and export the Performance report as
+CSV. That export is the keyword input this pipeline reads.
+
+**Why measured data and not estimates.** Third-party suites sell search volume,
+keyword difficulty and traffic potential. Those are models built from clickstream
+panels and extrapolation, they disagree with each other, and they are wrong in
+ways you cannot audit. Search Console tells you what your pages really got. The
+trade-off is honest and worth naming: Search Console can only describe queries
+you already appear for, so it is weaker for a brand new site with no history. In
+that case the ranking pages themselves, and the questions real customers ask
+you, are the input.
+
+### Bing Webmaster Tools
+
+Covers Bing and, by extension, several AI answer products that draw on its index.
+It offers the same kind of first-party query data, plus **IndexNow**, a push
+protocol that reports new and changed URLs instead of waiting for a crawl. Free,
+and it holds data Google's tools do not.
+
+### Your Sitemap
+
+`sitemap.xml` is the list of URLs you are asking search engines to index. It is
+published, machine readable and always current, which makes it the cheapest
+reliable inventory of your own site.
+
+* **Find it** at `domain.com/sitemap.xml`, or read the `Sitemap:` line in `domain.com/robots.txt`, which is authoritative when the two disagree.
+* **A sitemap index** is a sitemap of sitemaps, normal on larger sites. Follow its children to get the full URL list.
+* **Use it as an inventory**, not just as a submission. It answers two questions that matter before you write anything: which of your pages already target this topic (the cannibalization check), and which existing pages should link to the new one.
+* **Check it is honest.** URLs that 404, redirect, or carry `noindex` do not belong in it, and a page you care about that is missing from it is a page you have not really asked to have indexed.
 
 ### Baseline Site Crawl
 
-Run a full crawl before you change anything, using Screaming Frog, Sitebulb,
-Moz Pro, Ahrefs Site Audit or an equivalent. You are looking for the problems
-that are invisible from the browser:
+Run a full crawl of your own site before you change anything, using Screaming
+Frog, Sitebulb or an equivalent. These read your site directly, so what they
+report is fact rather than estimate. You are looking for the problems that are
+invisible from the browser:
 
 * Broken internal links and redirect chains
 * Duplicate or missing titles and meta descriptions
@@ -180,34 +218,44 @@ that are invisible from the browser:
 Keep the first crawl. It is the only before-picture you will ever have, and
 every later audit is measured against it.
 
-### Rank and Competitor Data
+### Tracking Position Over Time
 
-* **Rank tracking** records your positions for a fixed keyword set over time. The absolute number matters less than the direction and the comparison against competitors.
-* **Keyword and backlink tools** (Ahrefs, Semrush, Moz Pro) supply volume, difficulty, traffic potential and referring-domain counts. Treat every metric as a proprietary estimate rather than a fact, and use them for comparison, never for forecasting revenue.
+Search Console's average position, filtered by query and by page, is your rank
+history, and it is free and measured. Compare periods rather than reading a
+single number, because position averages over every impression in the range.
+Dedicated rank trackers add daily granularity and competitor comparison, which
+is useful at scale and is not required to work.
 
 ---
 
-## 3. Module 1: Keyword Research & Search Intent Strategy
+## 3. Module 1: Keyword Research and Search Intent
 
 Keyword research is the process of discovering, analyzing, and selecting the specific search terms that your target audience enters into search engines, ensuring your content meets market demand and aligns with business goals.
 
 ---
 
-### Search Volume vs. Traffic Potential (TP)
+### Start From What You Already Rank For
 
-Historically, SEOs evaluated keywords solely based on **Search Volume** (the average number of monthly searches for a single query). However, modern keyword selection requires focusing on **Traffic Potential (TP)**.
+Search Console's Performance report is the best keyword research tool you own,
+because every row in it is a query that really produced impressions for your
+site. Export it, then read it in four passes:
 
 ```
-Single Target Keyword ("SEO Checklist") ──> Search Volume: ~12,000 / month
-                                                 │
-                                                 ▼
-Ranks for 800+ Related Long-Tail Terms ──> Total Traffic Potential: ~35,000 / month
-("SEO audit checklist", "checklist for SEO", "search engine optimization list", etc.)
+Position 5 to 20, decent impressions  ──> striking distance: small gains, fast
+High impressions, low click rate      ──> a title and description problem, not a ranking one
+Query with no page of its own         ──> a content gap you can fill deliberately
+Several of your pages, one query      ──> cannibalization, fix before writing more
 ```
 
-* **Search Volume:** Measures how many times a single exact-match keyword is queried per month.
-* **Traffic Potential:** Calculates the total monthly organic search traffic generated by the top-ranking page across **all** the keywords it ranks for simultaneously.
-* **Key Insight:** Top-ranking pages rarely rank for just one term. On average, a page ranking #1 for a popular query also ranks in the top 10 for hundreds or thousands of secondary long-tail keywords. Therefore, Traffic Potential provides a vastly more accurate measurement of a topic's true commercial value.
+* **Striking distance** is where the cheapest wins are. A page sitting at position 8 for a query with real impressions needs depth and internal links, not a new article.
+* **Impressions without clicks** mean you are visible and unconvincing. That is a title tag and meta description job, and the result shows up in days rather than months.
+* **A query with no dedicated page** is the case for writing something new, and the impressions already prove the demand exists.
+* **Queries in the report you do not recognize** are how you find the language real people use, which is usually not the language you use.
+
+**For a page or a site with no history**, this data does not exist yet. Then the
+inputs are the pages that currently rank for the query, the questions customers
+actually ask you, and the People Also Ask box, all of which are observable
+without paying anyone for an estimate.
 
 ---
 
@@ -222,43 +270,40 @@ To avoid targeting keywords that drive useless traffic with low conversion rates
 
 ---
 
-### The 3 C's of Search Intent
+### Reading the Results Page
 
-Search intent represents the psychological driver or primary objective behind a user's query. Google prioritizes pages that fulfill this intent best. Analyze top-ranking competitor pages on the SERP using the **3 C's Framework**:
+Before writing anything, search the query and read what Google is already
+rewarding. The results page is the brief: it shows what this audience expects,
+and a page in the wrong shape does not rank however good it is.
 
-#### 1. Content Type
-Identify the dominant overall medium of top results:
-* Blog posts / Educational articles
-* E-commerce product landing pages
-* Category / Collection pages
-* Interactive web applications or free online tools
-* Video content
+Look at the top handful of results and answer four questions:
 
-#### 2. Content Format
-Identify the explicit structural presentation of top-ranking written content:
-* **How-To Guides / Step-by-Step Tutorials:** Best for process-oriented queries (e.g., *"How to change a flat tire"*).
-* **Listicles:** Best for broad options or ideas (e.g., *"15 Best SEO Tools"*).
-* **Comparison Reviews / Alternatives:** Best for evaluating products (e.g., *"Ahrefs vs. SEMrush"*).
-* **Comprehensive Ultimate Guides:** Best for broad foundational topics (e.g., *"SEO for Beginners"*).
-* **Calculators / Templates:** Best for utility queries (e.g., *"Mortgage calculator"*).
+1. **What kind of page is ranking?** Blog posts, product pages, category pages, tools, videos, forum threads. If the results are all tools, an article will not displace them.
+2. **What shape does the writing take?** Step-by-step instructions, a ranked list, a comparison, a definition, a template. Match the shape.
+3. **How deep do they go?** Read the subheadings of the top three to five pages. Their shared subtopics are the minimum you have to cover, and what none of them covers is your opening.
+4. **What angle do they take?** For beginners or for experts, free or premium, fastest or most thorough, updated for this year. The angle is usually visible in the titles.
 
-#### 3. Content Angle
-Identify the unique value proposition, hook, or psychological framing that appeals to searchers:
-* **Experience Level:** *"For Beginners"*, *"Advanced Strategies"*.
-* **Cost Factor:** *"Free"*, *"Cheap"*, *"Budget-Friendly"*.
-* **Speed / Timeliness:** *"Fast 5-Minute Setup"*, *"Updated for 2026"*.
-* **Validation / Proof:** *"Data-Backed"*, *"Tested"*, *"Proven Results"*.
+Also note what surrounds the organic results: a featured snippet, a People Also
+Ask box, a local pack or an AI answer each change how much traffic the first
+organic position is worth, and PAA is the best free source of real questions
+for your FAQ.
 
 ---
 
-### Keyword Difficulty (KD) & SERP Evaluation
+### Can You Realistically Rank
 
-* **Keyword Difficulty Score:** Proprietary tool metrics (e.g., Ahrefs KD) estimate how challenging it will be to rank on page one, primarily based on the backlink profile strength of top-ranking sites.
-* **Manual SERP Assessment:** Always verify raw KD scores manually by examining page-one search results for:
-  * Domain Rating / Authority of current rankers.
-  * Number of referring domains (backlinks) pointing directly to the competing URLs.
-  * Relevance and freshness of competing content.
-  * User intent match: can you produce content that is objectively 10x better or more comprehensive?
+Third-party tools sell a difficulty score. It is an estimate built mostly from
+backlink counts, and it cannot see your site. Judge the question directly
+instead, by looking at who holds the page-one results:
+
+* **Who are they?** A page of national publishers and established brands is a different proposition from a page of small competitors and thin affiliate posts.
+* **How good is the content really?** Read it. Outdated facts, missing subtopics, no first-hand experience and padding are all openings.
+* **How old is it?** A top result that has not been updated in years, on a topic that moves, is beatable.
+* **Do you have something they do not?** Your own data, your own photographs, a practitioner's experience, a tool, a clearer explanation. Without at least one, there is no reason for the result to change.
+* **What does your own Search Console say?** If you already appear on page two for this query, you are closer than any difficulty score would suggest.
+
+Be honest about the answer. A query you cannot win this year is a query to build
+towards with supporting pages, not one to spend your best writing on today.
 
 ---
 
@@ -556,7 +601,7 @@ Not all backlinks carry equal weight. A single link from an authoritative, highl
 1. **Topical Relevance:** The linking site and specific page must be topically related to your content niche. A link from a tech blog to a tech site is exponentially more valuable than a link from a cooking site.
 2. **Domain & Page Authority:** Sites with strong, legitimate backlink profiles pass higher authority ("link juice") down to linked target URLs.
 3. **Editorial Placement:** Links embedded naturally within body text (contextual editorial links) carry far more weight than boilerplate footer, sidebar, or author bio links.
-4. **Anchor Text Variety:** A natural link profile contains a mix of brand anchors (*"Ahrefs"*), exact-match keywords (*"SEO course"*), partial-match phrases, and naked URLs (*"ahrefs.com"*). Excessive exact-match anchor manipulation triggers algorithmic penalties.
+4. **Anchor Text Variety:** A natural link profile contains a mix of brand anchors (*"Northside Studio"*), exact-match keywords (*"SEO course"*), partial-match phrases, and naked URLs (*"northside.example"*). Excessive exact-match anchor manipulation triggers algorithmic penalties.
 5. **Link Attributes (DoFollow vs. NoFollow):** Standard links pass PageRank authority (**DoFollow**). Links tagged with `rel="nofollow"`, `rel="sponsored"`, or `rel="ugc"` instruct search engines not to pass authority, though they can still drive referral traffic.
 
 ---
@@ -714,7 +759,7 @@ and networks than your test.
 
 ### Common Technical SEO Errors & Automated Health Auditing
 
-Regular automated website audits (e.g., via Ahrefs Webmaster Tools or Google Search Console) help catch critical site health errors:
+Regular automated audits of your own site (Google Search Console, plus a crawler such as Screaming Frog or Sitebulb) help catch critical site health errors:
 
 ```
 +--------------------------+-----------------------------------------------------------+
@@ -839,12 +884,12 @@ Work the gates in order, because the fix differs completely at each one:
 - [ ] Install analytics (GA4 or a privacy-focused alternative) and verify a session, a page view and a conversion event all record.
 - [ ] Define what counts as a conversion, and record it as an event.
 - [ ] Verify the site in **Google Search Console** and **Bing Webmaster Tools**.
-- [ ] Run and archive a baseline crawl (Screaming Frog, Sitebulb, Moz Pro or equivalent).
+- [ ] Run and archive a baseline crawl of your own site (Screaming Frog, Sitebulb or equivalent).
 - [ ] Record starting positions for the keyword set you intend to move.
 
 ### Phase 1: Foundational Setup & Technical Hygiene
-- [ ] Install and verify site property in **Google Search Console** and **Ahrefs Webmaster Tools**.
-- [ ] Create and submit a clean, dynamic **XML Sitemap**.
+- [ ] Export the Search Console Performance report, which is the keyword input for everything below.
+- [ ] Create and submit a clean, dynamic **XML Sitemap**, and keep a copy of its URL list as your page inventory.
 - [ ] Verify `robots.txt` configuration, and ensure search crawlers are not blocking critical assets.
 - [ ] Ensure full SSL deployment (HTTPS enforcing).
 - [ ] Run an initial automated technical audit, and resolve 404 errors, broken redirects, and orphan pages.
@@ -853,8 +898,9 @@ Work the gates in order, because the fix differs completely at each one:
 
 ### Phase 2: Keyword Strategy & Content Creation
 - [ ] Identify target audience pain points and list core industry topics.
-- [ ] Conduct keyword research, analyze **Traffic Potential (TP)** and evaluate **Business Potential (0-3)**.
-- [ ] Analyze top-ranking SERPs to confirm the **3 C's of Search Intent** (Type, Format, Angle).
+- [ ] Read the Search Console export in four passes: striking distance, impressions without clicks, queries with no page, and cannibalization.
+- [ ] Evaluate **Business Potential (0-3)** for each candidate topic.
+- [ ] Read the live results page: what kind of page ranks, what shape the writing takes, how deep it goes, and what angle it takes.
 - [ ] Classify the query by intent type (informational, navigational, commercial, transactional) and confirm the page type matches.
 - [ ] Map one primary keyword to one URL, and check for cannibalization against existing pages.
 - [ ] Create detailed content outlines covering target subtopics and customer FAQs.
@@ -915,7 +961,7 @@ Work the gates in order, because the fix differs completely at each one:
 
 **DoFollow** An ordinary link that passes authority. Not an actual attribute, just the absence of `nofollow`.
 
-**Domain Authority / Domain Rating** Third-party scores (Moz, Ahrefs) estimating a domain's ranking strength. Useful for comparison, not a Google metric.
+**Domain Authority / Domain Rating** Third-party scores estimating a domain's ranking strength. A vendor model, not a Google metric, and not used by this pipeline.
 
 **E-E-A-T** Experience, Expertise, Authoritativeness, Trust. The quality framework from Google's rater guidelines.
 
@@ -933,7 +979,7 @@ Work the gates in order, because the fix differs completely at each one:
 
 **KPI** Key Performance Indicator, a metric chosen in advance to judge success.
 
-**Keyword Difficulty (KD)** A tool's estimate of how hard ranking on page one will be, based mostly on the backlinks of current top results.
+**Keyword Difficulty (KD)** A third-party estimate of how hard ranking on page one will be, based mostly on the backlinks of current top results. You will meet the term elsewhere. This guide judges the question by reading the results page instead (see Module 1).
 
 **Local pack** The three-result map block shown for local queries.
 
@@ -963,13 +1009,15 @@ Work the gates in order, because the fix differs completely at each one:
 
 **SERP features** Non-standard results sharing the page with organic listings: featured snippets, PAA, local packs, image packs, video carousels, knowledge panels, AI answers.
 
+**Sitemap** An XML file listing the URLs you are asking search engines to index. Also your cheapest inventory of your own pages.
+
 **Soft 404** A page returning a success status while showing "not found" content, or a redirect to an irrelevant page. Search engines treat it as an error.
 
 **Structured data** Machine-readable markup describing a page's content. See schema markup.
 
 **Topical authority** A site's perceived depth of coverage across a subject area, as opposed to the strength of a single page.
 
-**Traffic Potential (TP)** The total traffic the top-ranking page for a keyword receives across every keyword it ranks for.
+**Traffic Potential (TP)** A third-party estimate of the total traffic the top-ranking page for a keyword receives across every keyword it ranks for. Modelled, not measured, so this guide uses Search Console impressions instead.
 
 **White hat** Tactics that comply with search engine guidelines and prioritize the user.
 
@@ -987,9 +1035,9 @@ changing them here means changing them there too.
 
 | Guide section | Pipeline stage | Enforced value |
 | :--- | :--- | :--- |
-| Module 0, webmaster tools | `/seo-research` reads the exports you download from Search Console and Ahrefs | Exports are read by column name |
+| Module 0, Search Console | `/seo-research` reads the Performance export you download | Exports are read by column name |
 | Competitor gap analysis (Module 2) | `/seo-research` fetches the competitor pages you list | **Top 3 to 5 pages**, warned below 3 |
-| 3 C's of intent, business potential (Module 1) | `/seo-keywords` returns the intent read and the 0 to 3 score | Keywords must appear in the research |
+| Reading the results page, business potential (Module 1) | `/seo-keywords` returns the intent read (type, format, angle) and the 0 to 3 score | Keywords must appear in the research |
 | Topic coverage and FAQ questions | `/seo-brief` structure stage, then the outline | Sections trace to research |
 | Title tag length (Module 2) | `/seo-research` reports it against the target | **50 to 60 characters** |
 | Meta description length (Module 2) | `/seo-research` reports it against the target | **150 to 160 characters** |
