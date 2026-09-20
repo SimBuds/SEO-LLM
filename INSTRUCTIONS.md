@@ -45,12 +45,13 @@ The `<slug>` is the brief's file name without `.json`, so a page's research, its
 No model call in this stage. It gathers what the page has to beat.
 
 1. **Does the page exist?** The command asks. Give a URL and it snapshots the live page: title, meta description, H1 to H3 and word count, into `research/<slug>/page.json`. Say no and it records a new page.
-2. **Your exports.** Drop the Ahrefs keyword export and the Search Console query export into `research/<slug>/inputs/`. Columns are read by name, so download and drop, with no reshaping. Nothing is fetched from Ahrefs or Google, and no API key exists anywhere in this repo.
+2. **Your exports.** Drop the Search Console Performance export into `research/<slug>/inputs/`, which is the source this pipeline is built around because its numbers are measured rather than estimated. Columns are read by name, so download and drop, with no reshaping, and any other keyword export you happen to have parses as well. Nothing is fetched from Google, and no API key exists anywhere in this repo.
 3. **Competitors.** Put the top 3 to 5 ranking URLs into `research/<slug>/competitors.txt`, one per line. You find them in Google, because the pipeline never fetches a results page.
 4. **Collect:** `scripts/research_collect.sh` merges the exports by keyword, fetches each competitor (obeying `robots.txt`, waiting between requests to one host, caching the HTML), and writes `research/<slug>/research.json`.
+   It also builds your own page inventory from your sitemap, once per site, and records which of your pages already target a researched query. For a page that is not live yet, put your site URL in `research/<slug>/site.txt` so it knows where to look.
 5. **`check.sh research`:**
    - **Fails** only when the file's shape is broken.
-   - **Warns** on thin research: no keywords, no competitors, fewer than three fetched, or an existing page missing its title or meta description.
+   - **Warns** on thin research: no keywords, no competitors, fewer than three fetched, an existing page missing its title or meta description, or one of your own pages already targeting the query.
 6. **Your review:** read the competitor word counts and their H2 outlines. They set the length and the sections the page has to cover.
 
 ## 2. `/seo-keywords <slug>`: research → the target keyword
@@ -172,6 +173,7 @@ back, and always asks before replacing an artifact.
   - It checks the router's context size before every call and requires at least 32,768 tokens.
   - Thinking is off, and all sampling settings are fixed in the script.
   - `LLM_MODEL`, `LLM_MAX_TOKENS` and `LLM_TIMEOUT` change the model, output limit and timeout.
+- **`scripts/fetch_sitemap.sh`:** reads your sitemap (and a sitemap index) into a plain URL list, once per site, through the fetcher below.
 - **`scripts/fetch_page.sh`:** the only way this repo reaches the open web. It obeys `robots.txt`, waits between requests to one host, caches the HTML in `research/_cache/`, and pulls out the title, meta description, headings and word count. `FETCH_UA` sets the User-Agent, which carries no contact address by default.
 - **`scripts/research_collect.sh`:** merges your keyword exports by column name and fetches the competitor URLs into one `research.json`.
 - **`scripts/seo.sh`:** the interactive menu. It runs the other scripts and reads state from the artifacts, so it holds no state of its own.

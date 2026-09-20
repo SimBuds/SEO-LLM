@@ -217,9 +217,12 @@ research)
   (( FAILS == 0 )) || exit 1
 
   KW=$(jq '.keywords | length' "$RESEARCH")
-  (( KW > 0 )) || warn "no keywords: add an export to inputs/ or expect the keyword stage to work from competitor pages alone"
-  WITH_VOLUME=$(jq '[.keywords[] | select(.volume != null)] | length' "$RESEARCH")
-  (( KW == 0 || WITH_VOLUME > 0 )) || warn "no keyword carries a volume: the exports look like Search Console data only"
+  (( KW > 0 )) || warn "no keywords: add the Search Console Performance export to inputs/, or expect the keyword stage to work from competitor pages alone"
+  # Search Console data is what this pipeline is built around: measured
+  # impressions, clicks and positions for the user's own site. Anything else an
+  # export happens to carry is kept, but its absence is not worth a warning.
+  WITH_QUERY_DATA=$(jq '[.keywords[] | select(.impressions != null or .clicks != null or .position != null)] | length' "$RESEARCH")
+  (( KW == 0 || WITH_QUERY_DATA > 0 )) || warn "no keyword carries impressions, clicks or a position: this looks like an export without Search Console data, so the choice rests on the competitor pages"
   OK=$(jq '[.competitors[] | select(.fetched)] | length' "$RESEARCH")
   TOTAL=$(jq '.competitors | length' "$RESEARCH")
   (( TOTAL > 0 )) || warn "no competitor pages: add URLs to competitors.txt for intent and gap analysis"
@@ -228,6 +231,13 @@ research)
   if jq -e '.existing_page.exists' "$RESEARCH" > /dev/null; then
     jq -e '.existing_page.title | length > 0' "$RESEARCH" > /dev/null || warn "the existing page has no title tag"
     jq -e '.existing_page.meta_description | length > 0' "$RESEARCH" > /dev/null || warn "the existing page has no meta description"
+  fi
+  # Your own pages that already target one of these queries. Two pages chasing
+  # one query split their signals, so this is a decision to make before writing,
+  # not after (see SEO-GUIDE.md, keyword mapping and cannibalization).
+  OWN=$(jq -r '(.site_pages.matching // []) | length' "$RESEARCH")
+  if (( OWN > 0 )); then
+    warn "$OWN of your own pages already target a researched query, so consider updating one instead of adding another:"$'\n'"$(jq -r '.site_pages.matching[] | "  \(.keyword): \(.url)"' "$RESEARCH" | head -5)"
   fi
   ;;
 

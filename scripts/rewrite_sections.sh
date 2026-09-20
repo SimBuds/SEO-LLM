@@ -11,6 +11,7 @@
 # headings, similar length, no new numbers, no new absolute wording, CTA kept)
 # and retried once with seed 2. A part that fails twice keeps its unedited
 # text, with a WARN; the rewrite is polish, so it never stops the run.
+# Env: OUTPUTS_DIR (default outputs) relocates the output tree.
 # Every edited part then gets the same fact-verification call as the draft
 # (verify_part in lib_parts.sh), because an edit can reintroduce or reword a
 # claim. REWRITE_MODEL picks the model (default qwen). Re-running skips parts whose
@@ -27,7 +28,9 @@ TEMPERATURE=0.7
 source "$ROOT/scripts/lib_parts.sh"
 
 SLUG=$(basename "$BRIEF" .json)
-OUT="$ROOT/outputs/$SLUG"
+# OUTPUTS_DIR relocates the whole output tree, the same variable scripts/seo.sh
+# reads, so a test run can stay out of the repo's own outputs/.
+OUT="${OUTPUTS_DIR:-$ROOT/outputs}/$SLUG"
 SEC="$OUT/sections"
 RW="$OUT/rewrite"
 [[ -s "$SEC/00-intro.md" ]] || { echo "no drafted sections in $SEC; run /seo-draft first" >&2; exit 2; }

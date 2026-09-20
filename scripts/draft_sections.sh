@@ -10,6 +10,8 @@
 # NN-<heading>.ERROR.md and the script stops with exit 1. Re-running skips
 # parts that already exist and pass, so a stopped run resumes where it failed.
 # --fresh, or an outline newer than the saved parts, discards them first.
+#
+# Env: OUTPUTS_DIR (default outputs) relocates the output tree.
 # Each passing part then gets a fact-verification call (see verify_part).
 
 set -euo pipefail
@@ -22,7 +24,9 @@ VERIFY_MODEL="${VERIFY_MODEL:-${LLM_MODEL:-qwen}}"
 source "$ROOT/scripts/lib_parts.sh"
 
 SLUG=$(basename "$BRIEF" .json)
-OUT="$ROOT/outputs/$SLUG"
+# OUTPUTS_DIR relocates the whole output tree, the same variable scripts/seo.sh
+# reads, so a test run can stay out of the repo's own outputs/.
+OUT="${OUTPUTS_DIR:-$ROOT/outputs}/$SLUG"
 OUTLINE="$OUT/outline.md"
 SEC="$OUT/sections"
 [[ -r "$OUTLINE" ]] || { echo "no outline at $OUTLINE; run /seo-outline first" >&2; exit 2; }

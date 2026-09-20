@@ -33,13 +33,15 @@ Output **only** a JSON object with exactly these keys:
 1. **Every keyword you return must appear in the research above**, in the keyword
    list or in a competitor's title or headings. Copy it character for character.
    Never invent a keyword, never merge two into a new phrase, and never reword one.
-2. **Pick the primary keyword on traffic potential and fit, not on volume alone.**
-   A term with lower volume wins when it matches what this page is for, when the
-   ranking pages for it are weaker, or when its traffic potential is higher.
-   State that trade-off in `rationale`.
-3. **Do not repeat any number from the research.** The volumes, difficulties and
-   positions are already recorded. Refer to them in words ("the highest volume
-   term", "a lower difficulty"), not as figures.
+2. **Pick the primary keyword on measured demand and fit.** Prefer a term the
+   research shows really produced impressions for this site, especially one
+   already ranking just off the first page, where a better page moves it. A term
+   with fewer impressions wins when it matches what this page is for, or when the
+   pages ranking for it are weaker. State that trade-off in `rationale`.
+3. **Do not repeat any number from the research.** The impressions, positions and
+   any other figures are already recorded. Refer to them in words ("the query
+   with the most impressions", "already close to the first page"), not as
+   figures. Never compare two numbers you were not given.
 4. **Read the intent from the competitor pages**, not from the keyword. Their
    shared type, format and angle is what the searcher expects, and a page in the
    wrong format does not rank.

@@ -25,6 +25,14 @@ MODEL="${LLM_MODEL:-qwen}"
 MIN_CTX=32768
 
 [[ -r "$PROMPT_FILE" ]] || { echo "prompt file not readable: $PROMPT_FILE" >&2; exit 2; }
+# An empty prompt is never intentional, and it does not fail loudly on its own:
+# the router answers the system message alone and returns confident, unrelated
+# text that can even satisfy a schema. Seen 2026-09-20 when a mis-chained
+# fill_prompt.sh left the file empty.
+grep -q '[^[:space:]]' "$PROMPT_FILE" \
+  || { echo "prompt file is empty: $PROMPT_FILE" >&2
+       echo "  the step that wrote it failed. Chain the fill and the call with && so this cannot reach the router." >&2
+       exit 2; }
 [[ -r "$SYSTEM_FILE" ]] || { echo "system prompt not readable: $SYSTEM_FILE" >&2; exit 2; }
 
 # An empty or non-object schema file must fail here: sent as-is, the router

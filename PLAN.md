@@ -44,7 +44,7 @@ User in Claude Code
 
 Phases 6 to 13 are built, so the research stage runs end to end: page check, competitor and export collection, keyword choice, a staged brief builder, and the research detail reaching the outline. Planned next are a metadata pass writing `meta.json` (Phase 14), and an SEO knowledge base grounding the prompts in `SEO-GUIDE.md` plus a `/seo-generate` skill (Phase 15).
 
-The research stage ahead of ingest was added 2026-09-20. Ahrefs and Google data arrive as files the user exports, never through an API, so the pipeline needs no keys and breaks nobody's terms of service. Search engine results pages are never scraped.
+The research stage ahead of ingest was added 2026-09-20. Search Console data arrives as files the user exports, never through an API, so the pipeline needs no keys and breaks nobody's terms of service. Search engine results pages are never scraped. Third-party keyword estimates were dropped on 2026-09-20 in favour of measured first-party data, and the CSV parser still reads a volume column when an export carries one.
 
 No Python app. No workflow engine. No SQLite.
 
@@ -213,7 +213,7 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 
 ### Phase 7: Research collection (done 2026-09-20)
 - Files: `scripts/research_collect.sh`, `scripts/check.sh`, the `seo-research` skill.
-- Goal: Ahrefs and Search Console exports in `research/<slug>/inputs/` plus competitor URLs become one `research/<slug>/research.json`.
+- Goal: the Search Console export in `research/<slug>/inputs/` plus competitor URLs become one `research/<slug>/research.json`. Any other keyword export parses too, since columns are read by name.
 
 ### Phase 8: Keyword choice (done 2026-09-20)
 - Files: `prompts/keywords.md`, `prompts/keywords.schema.json`, `.claude/skills/seo-keywords/SKILL.md`, `scripts/check.sh`.
@@ -242,6 +242,17 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 ### Phase 14: Metadata + keywords
 - Files: `prompts/metadata.md`, `prompts/keywords.md`, `.claude/skills/seo-metadata/SKILL.md`, `.claude/skills/seo-keywords/SKILL.md`.
 - Goal: title, description, slug, FAQ, keyword expansion written to `meta.json`.
+
+### Phases 16 to 18: The interactive menu (done 2026-09-20)
+- Files: `scripts/seo.sh`, `.claude/settings.json`, `README.md`, `INSTRUCTIONS.md`.
+- Goal: `bash scripts/seo.sh [slug]` is the front door. It reads each stage's state from the artifacts on disk, runs the stage you pick, and `a` runs every ready stage in turn.
+- It stops before stages that need typed input, stops after each brief stage so it gets read, and stops at the first failure. Plain bash, no new dependency, so the declared stack is unchanged.
+
+### Phases 19 to 21: First-party data only, and the sitemap as an inventory (done 2026-09-20)
+- Files: `SEO-GUIDE.md`, `README.md`, `INSTRUCTIONS.md`, `PLAN.md`, both research skills, `prompts/keywords.md`, `scripts/check.sh`, `scripts/seo.sh`, `scripts/fetch_page.sh`, `scripts/fetch_sitemap.sh`, `scripts/research_collect.sh`.
+- Goal: the pipeline is documented and reasons around measured data. The Search Console Performance export is the source, third-party keyword estimates are gone from the guidance, and the 3 C's framing left the guide while `keywords.json` kept its type, format and angle fields.
+- The CSV parser deliberately keeps its Ahrefs column aliases, so an export a user already holds still works.
+- `scripts/fetch_sitemap.sh` builds a per-site page inventory from `sitemap.xml` (via `robots.txt`, following a sitemap index one level) through `fetch_page.sh --raw`, and `research.json` gains `site_pages`, which is the cannibalization check and the internal-link candidate list.
 
 ### Phase 15: Docs + SEO knowledge base
 - Files: `README.md`, `docs/google/{helpful-content,eeat,semantic-search,ai-content-guidelines}.md`, link from system prompt.

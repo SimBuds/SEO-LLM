@@ -52,7 +52,8 @@ SEO-LLM/
 ├── prompts/            # markdown prompt templates with {{PLACEHOLDERS}}, plus system.md (sent on every call)
 ├── scripts/
 │   ├── seo.sh          # interactive menu: stage status from disk, runs the stage you pick
-│   ├── fetch_page.sh   # polite page fetch: robots.txt, per-host delay, HTML cache, extraction
+│   ├── fetch_page.sh   # polite fetch: robots.txt, per-host delay, cache, extraction (--raw for non-HTML)
+│   ├── fetch_sitemap.sh # sitemap.xml (and sitemap indexes) → research/_sitemaps/<host>.txt
 │   ├── research_collect.sh # exports + competitor pages → research/<slug>/research.json
 │   ├── brief_stages.sh # one model call per brief stage, then the merge into briefs/<slug>.json
 │   ├── llm_call.sh     # curl wrapper: prompt-file + prompts/system.md → reply on stdout
@@ -160,7 +161,10 @@ router: serving qwen
   safely fix, which are still in the article, alongside the brief target and the
   draft and final word counts.
 - `RESEARCH_DIR`, `BRIEFS_DIR` and `OUTPUTS_DIR` relocate the whole tree, which
-  is how a test run stays out of the real directories.
+  is how a test run stays out of the real directories. `draft_sections.sh` and
+  `rewrite_sections.sh` read `OUTPUTS_DIR` too, so a whole run can land in a
+  scratch directory. Set it for one stage and not the next and the next stage
+  says plainly that it cannot find the previous stage's files.
 - It needs a terminal. Piped or redirected, it prints the status table once and
   exits, so it is safe in a script that just wants the state.
 
@@ -201,11 +205,13 @@ with their levels. With no output path it prints to stdout, so it can be piped.
 `scripts/research_collect.sh <slug> [--fresh]` turns what you gathered into one
 `research/<slug>/research.json`. It needs `page.json` and exits 2 without it.
 
-- **Keyword exports** go in `research/<slug>/inputs/` as CSV or TSV. Columns are
-  read by name, so an Ahrefs keyword export (`Keyword`, `Volume`, `Difficulty`,
-  `Traffic potential`, `CPC`, `Parent topic`) and a Search Console query export
-  (`Top queries`, `Clicks`, `Impressions`, `CTR`, `Position`) both work as
-  downloaded. Quoted fields containing commas are handled, a tab-separated file
+- **Keyword exports** go in `research/<slug>/inputs/` as CSV or TSV. The source
+  this pipeline is built around is the **Search Console Performance export**
+  (`Top queries`, `Clicks`, `Impressions`, `CTR`, `Position`), because those
+  numbers are measured rather than modelled. Columns are read by name, so any
+  other export works as downloaded too: a file carrying `Volume`, `Difficulty`,
+  `Traffic potential`, `CPC` or `Parent topic` still parses, and those fields
+  are recorded if you have them. Quoted fields containing commas are handled, a tab-separated file
   named `.csv` is detected, and `%` and thousands separators are stripped from
   numbers. Rows are merged by keyword, and each keyword lists the files it came
   from. An export with no recognizable keyword column exits 3 and prints the
@@ -214,12 +220,21 @@ with their levels. With no output path it prints to stdout, so it can be piped.
   `#` comments allowed. Each is fetched through `fetch_page.sh`, so robots.txt,
   the delay and the cache all apply. One that cannot be fetched is recorded with
   its reason and does not stop the others.
+- **Your sitemap becomes a page inventory.** When the page is live, or when you
+  put your site's URL in `research/<slug>/site.txt`, the collection fetches
+  `sitemap.xml` once per site (reading `robots.txt` for its real location, and
+  following a sitemap index one level) into `research/_sitemaps/<host>.txt`. It
+  is reused by every later page on that site. `research.json` then carries
+  `site_pages`: the URL count, and the pages of yours whose path already
+  contains every significant word of a researched query. That list is the
+  cannibalization check, and those URLs are your internal link candidates.
 - `check.sh research` FAILs only on a broken shape. Thin research (no exports, no
   competitors, fewer than the 3 to 5 pages SEO-GUIDE.md asks for) is a WARN,
   because a topic with no tool data is a real case.
 
-Search engine results pages are never fetched, and no Ahrefs or Google API is
-called. Tool data enters the pipeline only as files you export.
+Search engine results pages are never fetched, and no search or SEO-tool API is
+called. Data enters the pipeline only as files you export, plus the competitor
+pages you name.
 
 ### Choosing the target keyword
 
@@ -382,7 +397,9 @@ orphan its outline.
 | `research/<slug>/page.json` | `/seo-research` | Whether the page exists, and its title, meta description, headings and word count |
 | `research/<slug>/inputs/*.csv` | you | Keyword and query exports, read by column name |
 | `research/<slug>/competitors.txt` | you | Competitor URLs, one per line |
-| `research/<slug>/research.json` | `/seo-research` | The collected research: merged keywords, competitor pages, the existing page |
+| `research/<slug>/site.txt` | you | Your site's URL, when the page is not live yet, so the sitemap can be found |
+| `research/_sitemaps/<host>.txt` | `/seo-research` | Your own page inventory from the sitemap, fetched once per site |
+| `research/<slug>/research.json` | `/seo-research` | The collected research: merged keywords, competitor pages, the existing page, your matching pages |
 | `research/<slug>/_keywords_prompt.txt` | `/seo-keywords` | The filled keyword prompt |
 | `research/<slug>/keywords.json` | `/seo-keywords` | The target keyword, intent, business potential, questions and subtopics |
 | `research/<slug>/brief-stages/purpose.txt` | `/seo-brief` | The one-line page purpose, recorded once and reused by every stage |
@@ -446,7 +463,7 @@ which one. None of them are retried silently.
 | Exit | Meaning | What to do |
 | --- | --- | --- |
 | 1 | No prompt file given | Pass a prompt file as the first argument |
-| 2 | A file is unreadable, or the schema is not a JSON object | Check the path in the message. An empty or malformed schema file also lands here, deliberately, so a bad schema cannot turn into an unconstrained call |
+| 2 | A file is unreadable or unusable | Check the path in the message. An empty or malformed schema file lands here deliberately, so a bad schema cannot turn into an unconstrained call, and so does an empty prompt file, because the router would otherwise answer the system message alone and return confident, unrelated text |
 | 3 | The router serves less context than `MIN_CTX` | The preset was deployed smaller than 32768. Fix the preset in `~/Apps/Local-LLM`, or lower `MIN_CTX` if that is genuinely what you want |
 | 5 | `/models` has no entry for the model, or no context size in it | Confirm the router serves `qwen` with the quickstart check. A `/models` response shape change also lands here |
 | 7 | The router is unreachable | `systemctl --user is-active llama-server`, then check `LLM_HOST` |

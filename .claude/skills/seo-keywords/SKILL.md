@@ -68,5 +68,5 @@ one decision every later stage is built on.
 
 No brief, no outline, no metadata. The word-count target is not set here: it comes
 from the competitor word counts at the brief stage. Never search the web for
-keywords, and never call an Ahrefs or Google API. The only inputs are the research
-file and the user's one-line purpose.
+keywords, and never call a search or SEO-tool API. The only inputs are the
+research file and the user's one-line purpose.

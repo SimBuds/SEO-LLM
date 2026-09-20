@@ -7,6 +7,7 @@
 #   research/<slug>/page.json        written by /seo-research
 #   research/<slug>/inputs/*.csv     keyword and query exports you download
 #   research/<slug>/competitors.txt  one competitor URL per line, # comments ok
+#   research/<slug>/site.txt         your own site URL, when the page is not live yet
 # Writes research/<slug>/research.json, fetching each competitor page through
 # scripts/fetch_page.sh so robots.txt, the per-host delay and the cache all apply.
 #
@@ -164,12 +165,55 @@ if [[ -r "$URLS_FILE" ]]; then
   done < "$URLS_FILE"
 fi
 
+# --- your own pages, from the sitemap --------------------------------------
+# The inventory is per site, not per page, so it is fetched once and reused.
+# Its job here is the cannibalization check: which of your pages already target
+# this query, and which ones could link to the new page.
+SITE_PAGES='null'
+SITE_URL=""
+if jq -e '.exists' "$PAGE" > /dev/null 2>&1; then
+  SITE_URL=$(jq -r '.url' "$PAGE")
+elif [[ -r "$DIR/site.txt" ]]; then
+  SITE_URL=$(head -1 "$DIR/site.txt" | tr -d '[:space:]')
+fi
+
+if [[ -n "$SITE_URL" ]]; then
+  HOST=$(sed -E 's#^[a-zA-Z]+://##; s#/.*##; s#.*@##' <<< "$SITE_URL")
+  INVENTORY="$ROOT/_sitemaps/$HOST.txt"
+  if [[ ! -r "$INVENTORY" ]]; then
+    echo "fetching the sitemap for $HOST (once per site)..." >&2
+    bash "$HERE/fetch_sitemap.sh" "$SITE_URL" "$INVENTORY" || \
+      echo "WARN: no sitemap inventory for $HOST, so the cannibalization check is skipped" >&2
+  fi
+  if [[ -r "$INVENTORY" ]]; then
+    # A page "already targets" a keyword when every word of four letters or more
+    # in that keyword appears in the URL's own path.
+    SITE_PAGES=$(jq -R -s --argjson kws "$KEYWORDS" --arg host "$HOST" '
+      split("\n") | map(select(length > 0)) as $urls
+      | {
+          host: $host,
+          total: ($urls | length),
+          matching: [
+            $kws[] as $k
+            | ($k.keyword | ascii_downcase | [scan("[a-z0-9]{4,}")]) as $words
+            | select($words | length > 0)
+            | $urls[]
+            | . as $u
+            | ($u | ascii_downcase | sub("^https?://[^/]*"; "")) as $path
+            | select($words | all(. as $w | $path | test($w)))
+            | {keyword: $k.keyword, url: $u}
+          ]
+        }' "$INVENTORY")
+  fi
+fi
+
 # --- assemble --------------------------------------------------------------
 jq -n \
   --arg slug "$SLUG" \
   --argjson page "$(cat "$PAGE")" \
   --argjson keywords "$KEYWORDS" \
   --argjson competitors "$COMPETITORS" \
+  --argjson site_pages "$SITE_PAGES" \
   --arg inputs "${INPUT_FILES[*]:-}" '
   {
     slug: $slug,
@@ -178,7 +222,8 @@ jq -n \
     inputs: ($inputs | split(" ") | map(select(length > 0))),
     keywords: $keywords,
     competitors: $competitors,
-    competitor_word_counts: ($competitors | map(select(.fetched and .word_count != null) | .word_count))
+    competitor_word_counts: ($competitors | map(select(.fetched and .word_count != null) | .word_count)),
+    site_pages: $site_pages
   }' > "$OUT"
 
 echo "wrote $OUT" >&2

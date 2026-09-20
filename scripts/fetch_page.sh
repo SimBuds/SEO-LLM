@@ -2,6 +2,7 @@
 # Fetch one web page politely and extract its SEO surface as JSON.
 #
 # Usage: fetch_page.sh <url> [out.json]      fetch, extract, print or write JSON
+#        fetch_page.sh --raw <url> [out]     fetch anything, write the body as it came
 #        fetch_page.sh --absent [out.json]   record a page that does not exist yet
 #
 # Honors robots.txt for the requesting User-Agent, keeps a per-host delay, and
@@ -23,7 +24,7 @@ CACHE_TTL="${FETCH_CACHE_TTL:-86400}"
 MIN_DELAY="${FETCH_DELAY:-2}"
 TIMEOUT="${FETCH_TIMEOUT:-20}"
 
-usage() { echo "usage: fetch_page.sh <url> [out.json] | fetch_page.sh --absent [out.json]" >&2; exit 1; }
+usage() { echo "usage: fetch_page.sh <url> [out.json] | fetch_page.sh --raw <url> [out] | fetch_page.sh --absent [out.json]" >&2; exit 1; }
 
 emit() { # emit <json> [out.json]
   if [[ -n "${2:-}" ]]; then
@@ -142,6 +143,15 @@ if [[ "$1" == "--absent" ]]; then
   exit 0
 fi
 
+# --raw returns the body untouched, for the files that are not HTML: robots.txt,
+# sitemaps, feeds. Everything else about the fetch is identical, so there is
+# still one HTTP path in this repo and it still honours robots and the delay.
+RAW=0
+if [[ "$1" == "--raw" ]]; then
+  RAW=1; shift
+  [[ $# -ge 1 ]] || usage
+fi
+
 URL="$1"; OUT="${2:-}"
 [[ "$URL" =~ ^https?:// ]] || { echo "url must start with http:// or https://: $URL" >&2; usage; }
 
@@ -155,6 +165,17 @@ case "$HTTP_CODE" in
   2*) ;;
   *) echo "HTTP $HTTP_CODE for $URL" >&2; exit 4 ;;
 esac
+if (( RAW )); then
+  if [[ -n "$OUT" ]]; then
+    mkdir -p "$(dirname "$OUT")" || { echo "cannot create $(dirname "$OUT")" >&2; exit 2; }
+    cp "$BODY_PATH" "$OUT" || { echo "cannot write $OUT" >&2; exit 2; }
+    echo "wrote $OUT" >&2
+  else
+    cat "$BODY_PATH"
+  fi
+  exit 0
+fi
+
 case "$CONTENT_TYPE" in
   *html*) ;;
   *) echo "not HTML ($CONTENT_TYPE): $URL" >&2; exit 5 ;;

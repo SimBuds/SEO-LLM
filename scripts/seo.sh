@@ -229,7 +229,7 @@ action_collect() {
   say "  exports     $dir/inputs/            ($n_inputs file(s) found)"
   say "  competitors $dir/competitors.txt    ($n_urls URL(s) found)"
   say ""
-  say "Put the Ahrefs and Search Console exports in the inputs folder as downloaded,"
+  say "Put the Search Console Performance export in the inputs folder as downloaded,"
   say "and the top 3 to 5 ranking URLs in competitors.txt, one per line."
   if (( n_inputs == 0 && n_urls == 0 )); then
     read -r -p "Nothing to collect from yet. Continue anyway? [y/N] " yn

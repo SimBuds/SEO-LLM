@@ -36,10 +36,12 @@ This is the first stage of the pipeline, ahead of `/seo-keywords` and
      count. Name anything off the SEO-GUIDE.md targets, which are a title of 50
      to 60 characters, a meta description of 150 to 160, and exactly one H1.
 7. Ask for the research inputs, both optional:
-   - **Keyword exports** in `research/<slug>/inputs/`. Any CSV or TSV whose
-     columns are read by name, so an Ahrefs keyword export and a Search Console
-     query export both work unchanged. Tell the user to drop the files in and
-     say when they are there.
+   - **The Search Console Performance export** in `research/<slug>/inputs/`,
+     which is the source this pipeline is built around: measured impressions,
+     clicks and positions for the user's own site. Any other CSV or TSV parses
+     too, since columns are read by name. Tell the user to drop the files in and
+     say when they are there. If they have no Search Console history for this
+     page, say so plainly and carry on with the competitor pages alone.
    - **Competitors** in `research/<slug>/competitors.txt`, one URL per line,
      `#` comments allowed. SEO-GUIDE.md asks for the top 3 to 5 ranking pages
      for the target query. The user finds them in Google. Never fetch a search
@@ -79,7 +81,7 @@ it, and do not retry with a different tool or fetch the page another way.
 
 ## Out of scope
 
-No keyword choice and no brief: those are `/seo-keywords` and `/seo-brief`, which
-are not built yet. Never fetch a search engine results page, and never call an
-Ahrefs or Google API. Tool data enters this pipeline only as files the user
-exports.
+No keyword choice and no brief: those are `/seo-keywords` and `/seo-brief`.
+Never fetch a search engine results page, and never call a search or SEO-tool
+API. Data enters this pipeline only as files the user exports, plus the
+competitor pages they name.
