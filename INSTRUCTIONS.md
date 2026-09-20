@@ -1,13 +1,18 @@
 # Pipeline flow
 
-The pipeline has five commands, run in order in Claude Code. Each one writes files that the next one reads.
+The pipeline has six commands, run in order in Claude Code. Each one writes files that the next one reads.
 
 ```
 /seo-research <slug>  ──▶ research/<slug>/page.json + research.json
    │  (does the page exist? your keyword exports, the competitor pages)
    ▼
-source doc (.pdf/.docx/.md/.txt)
-   │  /seo-ingest <file>
+/seo-keywords <slug>  ──▶ research/<slug>/keywords.json
+   │  (the target keyword, the intent, the questions to answer)
+   ▼
+/seo-brief <slug>     ──▶ brief-stages/01..04, you approve each
+   │  (--merge writes the brief)          ▲
+   │                    source doc ───────┘  /seo-ingest <file>
+   │                    (.pdf/.md/.txt, optional: the facts stage reads it)
    ▼
 briefs/<slug>.json ── you review/edit ──┐
    │  /seo-outline briefs/<slug>.json   │
@@ -48,7 +53,26 @@ No model call in this stage. It gathers what the page has to beat.
    - **Warns** on thin research: no keywords, no competitors, fewer than three fetched, or an existing page missing its title or meta description.
 6. **Your review:** read the competitor word counts and their H2 outlines. They set the length and the sections the page has to cover.
 
-## 2. `/seo-ingest <file>`: document → brief
+## 2. `/seo-keywords <slug>`: research → the target keyword
+
+One model call at temperature 0.2 against `research.json` plus one line from you about what the page is for. It writes `research/<slug>/keywords.json`: the primary keyword, 2 to 6 secondary keywords, the intent (type, format, angle), a business-potential score of 0 to 3, the questions the ranking pages answer, and the subtopics they share.
+
+`check.sh keywords` **fails** when any keyword is missing from the research file, which catches a reworded keyword as well as an invented one, and **warns** when the reasoning repeats research figures or when your live page targets something else.
+
+## 3. `/seo-brief <slug>`: research → brief, one stage at a time
+
+Four stages, one model call each. The command stops after every stage so you can read and correct it, and each stage sees the ones you approved.
+
+1. **intent:** topic, audience, reader goal, tone, each with its reason.
+2. **structure:** the sections this page needs, each tagged with where it came from, plus the FAQ questions and the gaps in the ranking pages.
+3. **targets:** the brief's keywords and the call to action.
+4. **facts:** the business specifics, taken only from `briefs/_ingest/<slug>.txt`. With no source document the list is written empty and no call is made.
+
+Editing a stage file is usually better than rerunning it, because a rerun is a fresh sample and may change other fields too. `--redo <stage>` rebuilds one and drops every stage after it.
+
+**`--merge`** writes `briefs/<slug>.json` from the approved stages and runs `check.sh brief`. It refuses to overwrite an existing brief without `--force`. The word count is computed from the competitor median, not asked of the model, and the structure stage stays in its own file until Phase 11 gives the brief somewhere to put it.
+
+## 4. `/seo-ingest <file>`: document → brief
 
 1. **Guard:** if `briefs/<slug>.json` already exists, it asks before overwriting it.
 2. **Extract:** the text is pulled out with `pdftotext` (PDF), `pandoc` (Word, not installed yet) or a plain copy (`.md`, `.txt`) into `briefs/_ingest/<slug>.txt`. Under 50 characters stops the run, since the PDF is probably a scan.
@@ -65,7 +89,7 @@ No model call in this stage. It gathers what the page has to beat.
 6. **Fact check:** Claude Code compares each fact against the source text and lists anything added or overstated. It proposes fixes but doesn't make them.
 7. **Your review:** check and edit the brief before going on, since everything after this step is built from it.
 
-## 3. `/seo-outline <brief>`: brief → outline
+## 5. `/seo-outline <brief>`: brief → outline
 
 1. **Model call:** Qwen at temperature 0.3 writes headings only. Every section gets an `_Intent:` line and a `Keywords:` line.
 2. **Size:** the number of topic sections depends on the word count: 2 to 3 up to 1,000 words, 3 to 5 up to 1,800, and 4 to 6 above that.
@@ -74,7 +98,7 @@ No model call in this stage. It gathers what the page has to beat.
    - **Warns** on section or question counts outside the size table, subsections under the Conclusion, and keywords pasted into headings.
 4. **Retry:** on a failure, Claude Code asks whether to regenerate with seed 2 (then 3). The same seed repeats the same outline. Warnings don't block the draft.
 
-## 4. `/seo-draft <brief>`: outline → `draft.md` (`scripts/draft_sections.sh`)
+## 6. `/seo-draft <brief>`: outline → `draft.md` (`scripts/draft_sections.sh`)
 
 1. **Preconditions:** the brief passes its check and `outline.md` exists and passes its check. Otherwise the run stops and asks for `/seo-outline` first.
 2. **Split:** the outline becomes an intro plus one part per section, including the FAQ and the Conclusion.
@@ -98,7 +122,7 @@ No model call in this stage. It gathers what the page has to beat.
    - **Warns** on length, keyword overuse, bold, numbers that aren't in the facts, and absolute wording ("all", "every", "guaranteed"…).
 9. **Fact check:** Claude Code lists the fact-checker's rejected issues, which are still in the draft, then reviews the rest against the facts. It reports findings and doesn't edit the draft.
 
-## 5. `/seo-rewrite <brief>`: `draft.md` → `final.md` (`scripts/rewrite_sections.sh`)
+## 7. `/seo-rewrite <brief>`: `draft.md` → `final.md` (`scripts/rewrite_sections.sh`)
 
 1. **Preconditions:** `sections/00-intro.md` exists and no part is an `.ERROR.md`. Otherwise it asks for `/seo-draft` first.
 2. **Editing:** Qwen at temperature 0.7 edits each part in order with `prompts/rewrite.md`. It fixes awkward keyword phrasing, cuts filler and repetition, and fixes the fact-checker's rejected issues for that part.
@@ -123,6 +147,7 @@ No model call in this stage. It gathers what the page has to beat.
   - `LLM_MODEL`, `LLM_MAX_TOKENS` and `LLM_TIMEOUT` change the model, output limit and timeout.
 - **`scripts/fetch_page.sh`:** the only way this repo reaches the open web. It obeys `robots.txt`, waits between requests to one host, caches the HTML in `research/_cache/`, and pulls out the title, meta description, headings and word count. `FETCH_UA` sets the User-Agent, which carries no contact address by default.
 - **`scripts/research_collect.sh`:** merges your keyword exports by column name and fetches the competitor URLs into one `research.json`.
+- **`scripts/brief_stages.sh`:** one model call per brief stage, stopping after each for your approval, then `--merge` assembles `briefs/<slug>.json` and computes the word count from the competitor median.
 - **`scripts/fill_prompt.sh`:** fills every prompt from the brief, outline and source text, and fails if a placeholder is left unfilled.
 - **`scripts/check.sh`:** holds every rule (research, brief, outline, section, draft, rewrite). A problem that must be fixed is a FAIL. One worth a look is a WARN.
 - **`scripts/lib_parts.sh`:** shared by the loops and `check.sh`. It holds the fact-check pass, heading restore, bold removal, the absolute-wording pattern and the draft multiplier.
@@ -133,6 +158,8 @@ No model call in this stage. It gathers what the page has to beat.
 | Stage | Model | Temperature | Seed | Retry |
 | --- | --- | --- | --- | --- |
 | research | none, no model call | n/a | n/a | rerun, or `--fresh` to refetch |
+| keywords | qwen | 0.2 | 1 | rerun after fixing the research |
+| brief stage | qwen (`STAGE_MODEL`) | 0.3 | 1 | automatic, seed 2, then stop |
 | ingest | qwen | 0.2 | 1 | ask, then 0.1 |
 | outline | qwen | 0.3 | 1 | ask, then seed 2 or 3 |
 | draft part | qwen | 0.5 | 1 | automatic, seed 2 |
@@ -143,7 +170,9 @@ No model call in this stage. It gathers what the page has to beat.
 
 ```
 /seo-research client-page               # answer the page question, add exports and competitor URLs
-/seo-ingest  briefs/client-page.pdf     # then review/edit briefs/client-page.json
+/seo-keywords client-page               # pick the target keyword
+/seo-ingest  briefs/client-page.pdf     # optional: a source document for the facts stage
+/seo-brief   client-page                # four approved stages, then --merge
 /seo-outline briefs/client-page.json
 /seo-draft   briefs/client-page.json
 /seo-rewrite briefs/client-page.json    # read outputs/client-page/final.md
@@ -157,6 +186,8 @@ No model call in this stage. It gathers what the page has to beat.
 | `research/<slug>/inputs/*.csv` | you | The keyword and query exports you downloaded |
 | `research/<slug>/competitors.txt` | you | The competitor URLs you listed |
 | `research/<slug>/research.json` | research | Merged keywords, fetched competitor pages, the existing page |
+| `research/<slug>/keywords.json` | keywords | The target keyword, intent, business potential, questions, subtopics |
+| `research/<slug>/brief-stages/NN-<stage>.json` | brief | One approved stage, with its prompt and schema beside it |
 | `research/_cache/` | research | Cached competitor HTML, gitignored |
 | `briefs/_ingest/<slug>.txt` and `.prompt.txt` | ingest | Extracted source text and the filled prompt |
 | `briefs/<slug>.json` | ingest | The brief |
@@ -172,6 +203,8 @@ The prompt files are kept on purpose. When a result looks wrong, they show exact
 ## What still needs a person
 
 - **Finding the competitors.** You search Google and paste the top 3 to 5 URLs. The pipeline never fetches a results page.
+- **The call to action.** Stage 3 is where the model is most likely to promise something you do not offer, such as a downloadable checklist or a free trial. Read it before merging.
+- **The `omitted` list in stage 4.** Design notes and marketing adjectives belong there, but a real business detail can land there too.
 - **The brief.** The model sometimes overstates facts or turns design notes into facts.
 - **Absolute claims** that the fact-checker flagged but couldn't safely fix. List them with:
   `jq -r '.issues[]? | select(.accepted == false) | .sentence' outputs/<slug>/*/*.verify.json`

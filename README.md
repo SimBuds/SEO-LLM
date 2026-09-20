@@ -13,6 +13,10 @@ User in Claude Code
   ├─ /seo-keywords <slug>                    (Phase 8 - what does this page target?)
   │    └─ scripts/llm_call.sh prompts/keywords.md (schema-constrained)
   │         └─ writes research/<slug>/keywords.json
+  ├─ /seo-brief    <slug>                    (Phases 9-10 - brief in approved stages)
+  │    └─ scripts/brief_stages.sh: one call per stage, you approve each
+  │         intent -> structure -> targets -> facts, then --merge
+  │         └─ writes briefs/<slug>.json
   ├─ /seo-ingest  <doc.docx|doc.pdf|doc.md>  (Phase 3 — optional: doc → JSON brief)
   │    └─ pandoc / pdftotext → scripts/llm_call.sh prompts/ingest.md → writes briefs/<slug>.json
   ├─ /seo-outline briefs/<brief>.json        (Phase 2 — outline first)
@@ -30,7 +34,7 @@ Every scripts/llm_call.sh call → POST localhost:8080/v1/chat/completions
   model qwen, system message prompts/system.md, thinking off
 ```
 
-Phases 1 to 8 are built. Phases 9 to 11 add a brief built in approved stages. Later phases add metadata and keywords (`meta.json`), a single `/seo-generate` command, and an SEO knowledge base. See [PLAN.md](PLAN.md) for the full phase breakdown, and [INSTRUCTIONS.md](INSTRUCTIONS.md) for a step-by-step walk through every stage.
+Phases 1 to 11 are built, so the research reaches the outline. Later phases add metadata and keywords (`meta.json`), a single `/seo-generate` command, and an SEO knowledge base. Later phases add metadata and keywords (`meta.json`), a single `/seo-generate` command, and an SEO knowledge base. See [PLAN.md](PLAN.md) for the full phase breakdown, and [INSTRUCTIONS.md](INSTRUCTIONS.md) for a step-by-step walk through every stage.
 
 ### Why this shape
 - **CC is the harness.** Skills replace a CLI, the Bash tool replaces a workflow engine, and files replace a database.
@@ -49,6 +53,7 @@ SEO-LLM/
 ├── scripts/
 │   ├── fetch_page.sh   # polite page fetch: robots.txt, per-host delay, HTML cache, extraction
 │   ├── research_collect.sh # exports + competitor pages → research/<slug>/research.json
+│   ├── brief_stages.sh # one model call per brief stage, then the merge into briefs/<slug>.json
 │   ├── llm_call.sh     # curl wrapper: prompt-file + prompts/system.md → reply on stdout
 │   ├── fill_prompt.sh  # fills a template's {{PLACEHOLDERS}} from a brief, outline, or source text
 │   ├── draft_sections.sh # section-by-section drafting loop: split, budget, call, verify, check, retry, stitch
@@ -177,6 +182,47 @@ restating the research figures, so volumes and difficulties stay in
 The word-count target is not set here. It comes from the competitor word counts
 at the brief stage.
 
+### Building the brief in stages
+
+`/seo-brief <slug>` runs `scripts/brief_stages.sh`, which makes **one call per
+stage** and stops after each so you can correct it before the next runs:
+
+| Stage | Produces | Reads |
+| --- | --- | --- |
+| 1 intent | topic, audience, reader goal, tone with its reason | research, keyword choice, your one-line purpose |
+| 2 structure | sections with their source, FAQ questions, gaps in the ranking pages | stage 1 plus the research |
+| 3 targets | the brief's keywords and the call to action | stages 1 to 2 plus the keyword choice |
+| 4 facts | the business specifics the article may state, and what was left out | stages 1 to 3 plus `briefs/_ingest/<slug>.txt` |
+
+The purpose is recorded once in `brief-stages/purpose.txt` and reused, so a later
+stage cannot drift onto a different page. Every stage sees the approved ones, so
+an edit you make to stage 1 changes what stage 2 produces. `--redo <stage>` drops
+that stage and every stage after it, because the later ones were built on the
+version being replaced.
+
+Two deliberate choices in the merge:
+
+- **`word_count` is computed, not generated.** It is the median of the competitor
+  word counts actually fetched, rounded to 50 and clamped to 600 to 3000, or 1000
+  when no competitor page was fetched. A number the research already implies
+  should be auditable rather than sampled.
+- **Facts come only from your source document.** With no `briefs/_ingest/<slug>.txt`
+  the facts list is written empty and no call is made, because a page with no
+  source has no business specifics to state. The prompt keeps every qualifier
+  ("most orders", "from $450") and pushes design notes and marketing adjectives
+  into an `omitted` list with the reason, so you can put anything back.
+
+```bash
+# Runs in: local terminal
+bash scripts/brief_stages.sh about --purpose "An about page for a Hamilton web studio"
+bash scripts/brief_stages.sh about            # each later stage
+bash scripts/brief_stages.sh about --merge    # writes briefs/about.json and checks it
+```
+
+The structure stage is not merged into the brief: the seven-key brief has nowhere
+to put sections, questions or gaps, so they stay in `02-structure.json` until
+Phase 11 adds those keys.
+
 ## The model wrapper
 
 `scripts/llm_call.sh <prompt-file> [temperature] [seed] [schema-file]`
@@ -207,9 +253,26 @@ Posts a non-streaming request to `/v1/chat/completions` and prints `.choices[0].
 }
 ```
 
-All seven keys are required. `facts` lists the business specifics (names, prices, policies, timelines) the outline and draft may state, and the prompts forbid inventing any others. It may be empty for a generic topic and holds at most 40 entries. `tone` is one of `Professional`, `Authoritative`, `Conversational`, `Friendly`, or `Technical`, `word_count` is a whole number, and `keywords` holds 3 to 6 entries. [prompts/brief.schema.json](prompts/brief.schema.json) states the same rules for the router, and `/seo-ingest` checks a generated brief against them with `jq`.
+Four optional keys carry the research forward when `/seo-brief` wrote the brief:
 
-`scripts/fill_prompt.sh` substitutes these into the templates' placeholders (`{{TOPIC}}`, `{{BRIEF}}`, `{{TONE}}`, `{{AUDIENCE}}`, `{{KEYWORDS}}`, `{{WORD_COUNT}}`, `{{CTA}}`, `{{FACTS}}`, plus `{{OUTLINE}}` and `{{SOURCE_TEXT}}`) and exits 1 if a template placeholder is left unfilled.
+```json
+{
+  "search_intent": {"type": "blog post", "format": "how-to guide", "angle": "comprehensive optimization steps"},
+  "must_cover": ["Getting indexed", "Increasing prominence"],
+  "questions": ["how long does seo take to work?"],
+  "existing_page": {"url": "https://example.com/seo", "title": "Old page", "word_count": 400}
+}
+```
+
+`/seo-outline` uses them: it covers every `must_cover` subtopic, takes the FAQ
+from `questions` when there are any, and matches the researched intent's format.
+A brief without them behaves exactly as before, so hand-written briefs and
+`/seo-ingest` output stay valid. `check.sh brief` accepts a brief with or without
+them and rejects an unknown key, which catches a typo such as `mustcover`.
+
+All seven required keys are still required. `facts` lists the business specifics (names, prices, policies, timelines) the outline and draft may state, and the prompts forbid inventing any others. It may be empty for a generic topic and holds at most 40 entries. `tone` is one of `Professional`, `Authoritative`, `Conversational`, `Friendly`, or `Technical`, `word_count` is a whole number, and `keywords` holds 3 to 6 entries. [prompts/brief.schema.json](prompts/brief.schema.json) states the same rules for the router, and `/seo-ingest` checks a generated brief against them with `jq`.
+
+`scripts/fill_prompt.sh` substitutes these into the templates' placeholders (`{{TOPIC}}`, `{{BRIEF}}`, `{{TONE}}`, `{{AUDIENCE}}`, `{{KEYWORDS}}`, `{{WORD_COUNT}}`, `{{CTA}}`, `{{FACTS}}`, plus `{{SEARCH_INTENT}}`, `{{MUST_COVER}}`, `{{QUESTIONS}}`, `{{EXISTING_PAGE}}`, `{{OUTLINE}}` and `{{SOURCE_TEXT}}`) and exits 1 if a template placeholder is left unfilled. The four research placeholders fill with a stated value such as `(none researched)` when the brief does not carry them, so one prompt serves both brief shapes.
 
 `word_count` also sizes the outline: up to 1000 words gets 2 to 3 topic sections, up to 1800 gets 3 to 5, and longer gets 4 to 6 (the table in [prompts/outline.md](prompts/outline.md), mirrored in `scripts/check.sh`).
 
@@ -264,6 +327,8 @@ orphan its outline.
 | `research/<slug>/research.json` | `/seo-research` | The collected research: merged keywords, competitor pages, the existing page |
 | `research/<slug>/_keywords_prompt.txt` | `/seo-keywords` | The filled keyword prompt |
 | `research/<slug>/keywords.json` | `/seo-keywords` | The target keyword, intent, business potential, questions and subtopics |
+| `research/<slug>/brief-stages/purpose.txt` | `/seo-brief` | The one-line page purpose, recorded once and reused by every stage |
+| `research/<slug>/brief-stages/NN-<stage>.json` | `/seo-brief` | One approved brief stage, with its `.prompt.txt`, `.schema.json` and `.prior.json` beside it |
 | `research/_cache/*.body` | `/seo-research` | Cached raw HTML and response status, gitignored |
 | `briefs/_ingest/<slug>.txt` | `/seo-ingest` | Plain text pulled out of the source document |
 | `briefs/_ingest/<slug>.prompt.txt` | `/seo-ingest` | The filled ingest prompt sent to the model |

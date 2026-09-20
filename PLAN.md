@@ -106,6 +106,11 @@ SEO-LLM/
 }
 ```
 
+Briefs written by `/seo-brief` also carry four optional research keys,
+`search_intent`, `must_cover`, `questions` and `existing_page`, which the outline
+stage consumes. They are optional so that a hand-written brief and `/seo-ingest`
+output remain valid (added 2026-09-20).
+
 The shape is enforced twice: `prompts/brief.schema.json` constrains what the router may return during ingest, and `scripts/check.sh brief` re-checks the saved file with `jq`.
 
 ---
@@ -218,9 +223,11 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - Files: `scripts/brief_stages.sh`, `prompts/brief-intent.md`, `prompts/brief-structure.md`, `prompts/brief-targets.md`, `prompts/brief-facts.md`, `.claude/skills/seo-brief/SKILL.md`.
 - Goal: four approved stages (intent and audience, structure and gaps, keywords and length, facts and CTA) merge into `briefs/<slug>.json` in the current seven-key shape.
 
-### Phase 11: Research detail in the brief
-- Files: `prompts/brief.schema.json`, `scripts/check.sh`, `prompts/outline.md`.
+### Phase 11: Research detail in the brief (done 2026-09-20)
+- Files: `prompts/brief.schema.json`, `scripts/check.sh`, `prompts/outline.md`, `scripts/brief_stages.sh`, `scripts/fill_prompt.sh`, `README.md`, `PLAN.md`.
 - Goal: optional `search_intent`, `must_cover`, `questions` and `existing_page` keys reach the outline, so it covers the competitor gaps.
+- The keys are optional, so hand-written briefs and `/seo-ingest` output stay valid. `check.sh brief` requires the seven, allows these four, and rejects anything else.
+- Observed: from the same merged brief, the outline built with the keys followed the researched subtopics and used the researched FAQ questions, while the same brief stripped of them produced a structure of the model's own invention.
 
 ### Phase 12: Metadata + keywords
 - Files: `prompts/metadata.md`, `prompts/keywords.md`, `.claude/skills/seo-metadata/SKILL.md`, `.claude/skills/seo-keywords/SKILL.md`.

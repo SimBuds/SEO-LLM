@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Fill a prompt template's {{PLACEHOLDERS}}.
 # Usage: fill_prompt.sh <template> [--brief brief.json] [--outline outline.md] [--source source.txt]
-#   --brief    fills TOPIC, BRIEF, AUDIENCE, TONE, WORD_COUNT, KEYWORDS, CTA, FACTS
+#   --brief    fills TOPIC, BRIEF, AUDIENCE, TONE, WORD_COUNT, KEYWORDS, CTA, FACTS,
+#              and from the optional research keys SEARCH_INTENT, MUST_COVER,
+#              QUESTIONS, EXISTING_PAGE (each a stated placeholder when absent)
 #   --outline  fills OUTLINE
 #   --source   fills SOURCE_TEXT: runs of spaces squeezed, cut at SOURCE_MAX chars
 #              with a visible truncation marker
@@ -61,7 +63,14 @@ FILLED=$(jq -nrj --rawfile t "$TEMPLATE" --argjson b "$BRIEF_JSON" \
       WORD_COUNT: ($b.word_count | tostring),
       KEYWORDS: ($b.keywords | join(", ")),
       CTA: $b.cta,
-      FACTS: (($b.facts // []) | if length == 0 then "(none provided)" else map("- " + .) | join("\n") end)
+      FACTS: (($b.facts // []) | if length == 0 then "(none provided)" else map("- " + .) | join("\n") end),
+      SEARCH_INTENT: (if $b.search_intent == null then "(not researched)"
+        else "\($b.search_intent.type), \($b.search_intent.format), angle: \($b.search_intent.angle)" end),
+      MUST_COVER: (($b.must_cover // []) | if length == 0 then "(none researched)" else map("- " + .) | join("\n") end),
+      QUESTIONS: (($b.questions // []) | if length == 0 then "(none researched)" else map("- " + .) | join("\n") end),
+      EXISTING_PAGE: (if $b.existing_page == null then "(new page, nothing live yet)"
+        else "\($b.existing_page.url)" + (if $b.existing_page.title != null and $b.existing_page.title != "" then " titled \"\($b.existing_page.title)\"" else "" end)
+             + (if $b.existing_page.word_count != null then " (\($b.existing_page.word_count) words)" else "" end) end)
     } end)
   + (if $has_outline == "1" then {OUTLINE: $outline} else {} end)
   + (if $has_source == "1" then {SOURCE_TEXT: $source} else {} end)
@@ -74,7 +83,8 @@ LEFT=$(grep -oE '\{\{[A-Z_]+\}\}' "$TEMPLATE" | sort -u | while read -r p; do
   case "$p" in
     "{{OUTLINE}}") [[ -n "$OUTLINE" ]] || echo "$p" ;;
     "{{SOURCE_TEXT}}") [[ -n "$SOURCE" ]] || echo "$p" ;;
-    "{{TOPIC}}"|"{{BRIEF}}"|"{{AUDIENCE}}"|"{{TONE}}"|"{{WORD_COUNT}}"|"{{KEYWORDS}}"|"{{CTA}}"|"{{FACTS}}")
+    "{{TOPIC}}"|"{{BRIEF}}"|"{{AUDIENCE}}"|"{{TONE}}"|"{{WORD_COUNT}}"|"{{KEYWORDS}}"|"{{CTA}}"|"{{FACTS}}"|\
+    "{{SEARCH_INTENT}}"|"{{MUST_COVER}}"|"{{QUESTIONS}}"|"{{EXISTING_PAGE}}")
       [[ -n "$BRIEF" ]] || echo "$p" ;;
     *) jq -e --arg k "${p:2:${#p}-4}" 'has($k)' <<< "$EXTRA" > /dev/null || echo "$p" ;;
   esac

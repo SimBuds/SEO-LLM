@@ -4,7 +4,11 @@
 # verify_part expects ROOT, BRIEF, and VERIFY_MODEL to be set by the caller.
 
 # Sentences with absolute wording, used by the verifier hints and the checks.
-ABSOLUTE_SENTENCE='[^.!?]*\b(all|every|always|never|guarantee[sd]?|any circumstances|complete control|entirely|without compromise)\b[^.!?]*[.!?]'
+# A sentence starts at a line start or after whitespace, never mid-word, and a
+# dot with no space after it is part of a word ("example.com", ".org"), not a
+# sentence end. Without both, "required example.com in all samples." matched as
+# the phantom sentence "com in all samples." (found in the 2026-09-20 QA run).
+ABSOLUTE_SENTENCE='(^|[[:space:]])([^.!?]|\.[^[:space:]])*\b(all|every|always|never|guarantee[sd]?|any circumstances|complete control|entirely|without compromise)\b([^.!?]|\.[^[:space:]])*[.!?]'
 
 # draft_factor <word_count>: how far above word_count the draft aims, in
 # percent. The rewrite and its re-verification cut 20-35%, depending on how
@@ -88,7 +92,11 @@ verify_part() {
   jq -rj --rawfile t "$orig" '
     [.issues[] | select(.accepted)]
     | reduce .[] as $i ($t; split($i.sentence) | join($i.replacement))
-  ' "$report" | sed -E 's/ {2,}/ /g; s/ +([.,;:])/\1/g; s/^ +//' > "$out"
+  # Tidy the seams a swap leaves behind. The punctuation rule only closes a gap
+  # when the punctuation ends a word: without the trailing context it deleted the
+  # space before every dotted token, turning "the .example domain" into
+  # "the.example domain" (found in the 2026-09-20 QA run).
+  ' "$report" | sed -E 's/ {2,}/ /g; s/ +([.,;:])([[:space:]]|$)/\1\2/g; s/^ +//' > "$out"
   if [[ -n "$headsrc" ]]; then restore_headings "$headsrc" "$out"; fi
   local total applied rejected
   total=$(jq '.issues | length' "$report")

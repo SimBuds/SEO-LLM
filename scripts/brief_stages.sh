@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build a brief one approved stage at a time.
 #
-# Usage: brief_stages.sh <slug> [--purpose "one line"] [--redo <stage>]
+# Usage: brief_stages.sh <slug> [--purpose "one line"] [--redo <stage>] [--merge]
 #
 # Runs the first stage that has no file yet, writes it, prints it, and stops, so
 # the user reads and edits it before the next stage runs. Rerunning continues
@@ -11,7 +11,10 @@
 # Reads research/<slug>/{research.json,keywords.json} and the purpose recorded on
 # the first run. Writes research/<slug>/brief-stages/NN-<stage>.{json,prompt.txt}.
 #
-# Env: RESEARCH_DIR (default research), STAGE_MODEL (default the wrapper's qwen).
+# --merge assembles the approved stages into briefs/<slug>.json and checks it.
+#
+# Env: RESEARCH_DIR (default research), BRIEFS_DIR (default briefs),
+#      STAGE_MODEL (default the wrapper's qwen).
 #
 # Exit codes: 1 usage, 2 missing input, 3 the model's reply was unusable twice.
 
@@ -21,15 +24,22 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT="${RESEARCH_DIR:-research}"
 TEMP=0.3
 
-# Stage order. Phase 10 appends targets and facts.
-STAGES=(intent structure)
+# Stage order.
+STAGES=(intent structure targets facts)
+
+# Used when no competitor page was fetched, so a brief still has a target.
+DEFAULT_WORDS=1000
+MIN_WORDS=600
+MAX_WORDS=3000
 
 SLUG="${1:?usage: brief_stages.sh <slug> [--purpose \"one line\"] [--redo <stage>]}"; shift
-PURPOSE="" REDO=""
+PURPOSE="" REDO="" MERGE=0 FORCE=0
 while (( $# )); do
   case "$1" in
     --purpose) PURPOSE="${2:?--purpose needs text}"; shift 2 ;;
     --redo)    REDO="${2:?--redo needs a stage name}"; shift 2 ;;
+    --merge)   MERGE=1; shift ;;
+    --force)   FORCE=1; shift ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -84,10 +94,26 @@ run_stage() { # run_stage <index> <stage>
   jq -e --arg s "$stage" '.[$s]' prompts/brief-stage.schema.json > "$schema" \
     || { echo "no schema for stage $stage in prompts/brief-stage.schema.json" >&2; exit 2; }
 
+  # The facts stage reads a source document instead of the research: business
+  # specifics come from what the user supplied, never from competitors.
+  if [[ "$stage" == facts ]]; then
+    local source="${BRIEFS_DIR:-briefs}/_ingest/$SLUG.txt"
+    if [[ ! -r "$source" ]]; then
+      # No source means no facts. That is a real answer, so it is recorded
+      # without spending a call on it.
+      jq -n '{facts: [], omitted: ["no source document at briefs/_ingest/<slug>.txt, so no business specifics were available"]}' > "$out"
+      echo "wrote $out (no source document, facts left empty)" >&2
+      return 0
+    fi
+  fi
+
   local -a fill=(prompts/brief-"$stage".md
     --set-file RESEARCH="$RESEARCH"
     --set-file KEYWORD_CHOICE="$KEYWORDS"
     --set PAGE_PURPOSE="$PURPOSE")
+  if [[ "$stage" == facts ]]; then
+    fill+=(--source "${BRIEFS_DIR:-briefs}/_ingest/$SLUG.txt")
+  fi
   prior=$(prior_json "$idx")
   if [[ "$prior" != "{}" ]]; then
     printf '%s\n' "$prior" | jq . > "${out%.json}.prior.json"
@@ -109,6 +135,73 @@ run_stage() { # run_stage <index> <stage>
   echo "stage $stage failed twice: read $prompt and fix the input before retrying" >&2
   exit 3
 }
+
+# The length target is computed, never asked of the model: the median of the
+# competitor pages that were actually fetched, rounded to 50 and clamped. A
+# number the research already implies should be auditable, not sampled.
+target_words() {
+  local counts median
+  counts=$(jq -r '.competitor_word_counts // [] | .[]' "$RESEARCH" | sort -n)
+  if [[ -z "$counts" ]]; then
+    echo "$DEFAULT_WORDS"
+    return 0
+  fi
+  median=$(awk '{a[NR]=$1} END {print (NR % 2) ? a[(NR+1)/2] : int((a[NR/2] + a[NR/2+1]) / 2)}' <<< "$counts")
+  median=$(( (median + 25) / 50 * 50 ))
+  (( median < MIN_WORDS )) && median=$MIN_WORDS
+  (( median > MAX_WORDS )) && median=$MAX_WORDS
+  echo "$median"
+}
+
+merge_brief() {
+  local i=1 stage f words brief
+  for stage in "${STAGES[@]}"; do
+    f=$(stage_file "$i" "$stage")
+    [[ -r "$f" ]] || { echo "stage $stage is missing ($f): run brief_stages.sh $SLUG first" >&2; exit 2; }
+    i=$((i + 1))
+  done
+  brief="${BRIEFS_DIR:-briefs}/$SLUG.json"
+  if [[ -e "$brief" ]] && (( ! FORCE )); then
+    echo "$brief already exists. Review it, then rerun with --merge --force to replace it." >&2
+    exit 2
+  fi
+  words=$(target_words)
+  mkdir -p "$(dirname "$brief")"
+  # The structure stage and the keyword choice ride along in the optional
+  # research keys, so the outline stage can see what the ranking pages cover.
+  jq -n \
+    --slurpfile intent "$(stage_file 1 intent)" \
+    --slurpfile structure "$(stage_file 2 structure)" \
+    --slurpfile targets "$(stage_file 3 targets)" \
+    --slurpfile facts "$(stage_file 4 facts)" \
+    --slurpfile keywords "$KEYWORDS" \
+    --slurpfile research "$RESEARCH" \
+    --argjson words "$words" '
+    {
+      topic: $intent[0].topic,
+      target_audience: $intent[0].target_audience,
+      tone: $intent[0].tone,
+      word_count: $words,
+      keywords: $targets[0].keywords,
+      cta: $targets[0].cta,
+      facts: $facts[0].facts,
+      search_intent: $keywords[0].intent,
+      must_cover: [$structure[0].sections[].heading],
+      questions: $structure[0].faq_questions
+    }
+    + (if $research[0].existing_page.exists then
+         {existing_page: ($research[0].existing_page
+            | {url, title, word_count} | with_entries(select(.value != null)))}
+       else {} end)' > "$brief"
+  echo "wrote $brief (word_count $words from the competitor median)" >&2
+  bash "$HERE/check.sh" brief "$brief"
+}
+
+if (( MERGE )); then
+  merge_brief
+  jq . "${BRIEFS_DIR:-briefs}/$SLUG.json"
+  exit 0
+fi
 
 # Redo drops that stage and everything after it: a changed stage invalidates the
 # stages that were built on it.
@@ -138,7 +231,7 @@ for stage in "${STAGES[@]}"; do
     if (( remaining > 0 )); then
       echo "review $file, then rerun for the next stage ($remaining left)" >&2
     else
-      echo "all stages done: ${STAGE_DIR}" >&2
+      echo "all stages done. Review them, then rerun with --merge to write the brief." >&2
     fi
     jq . "$file"
     exit 0
@@ -146,7 +239,7 @@ for stage in "${STAGES[@]}"; do
   i=$((i + 1))
 done
 
-echo "every stage already exists in $STAGE_DIR. Use --redo <stage> to rebuild one." >&2
+echo "every stage already exists in $STAGE_DIR. Use --merge to write the brief, or --redo <stage> to rebuild one." >&2
 # Name the stage files rather than globbing: the prompt, schema and prior
 # sidecars sit beside them and must not be merged in.
 files=(); i=1

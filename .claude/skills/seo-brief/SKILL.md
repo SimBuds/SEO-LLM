@@ -1,6 +1,6 @@
 ---
 name: seo-brief
-description: Build a content brief one approved stage at a time from a page's research and keyword choice, stopping after each stage so the user can correct it. Phase 9 stage, between /seo-keywords and /seo-outline. Use when the user runs /seo-brief <slug> or asks to turn research into a brief.
+description: Build a content brief one approved stage at a time from a page's research and keyword choice, stopping after each stage so the user can correct it, then merge the approved stages into briefs/<slug>.json. Phases 9 and 10, between /seo-keywords and /seo-outline. Use when the user runs /seo-brief <slug> or asks to turn research into a brief.
 ---
 
 # seo-brief
@@ -9,10 +9,10 @@ Run `research/<slug>/` through the brief stages, one call per stage, stopping
 after each so the user reads and edits it. Stage files live in
 `research/<slug>/brief-stages/`.
 
-Stages built so far: **intent** (topic, audience, reader goal, tone) and
-**structure** (the sections this page needs, the FAQ questions, the gaps in the
-ranking pages). Stages 3 and 4, and writing `briefs/<slug>.json`, are Phase 10
-and are not built yet. Say so if the user expects a brief file at the end.
+The four stages: **intent** (topic, audience, reader goal, tone), **structure**
+(sections, FAQ questions, gaps in the ranking pages), **targets** (keywords and
+the call to action) and **facts** (the business specifics the article may state).
+Then `--merge` writes `briefs/<slug>.json`.
 
 ## Inputs
 
@@ -26,6 +26,11 @@ and are not built yet. Say so if the user expects a brief file at the end.
 1. The router serves `qwen`: `curl -s localhost:8080/models | jq -er '.data[] | select(.id=="qwen") | .id'` prints `qwen`.
 2. `research/<slug>/research.json` and `research/<slug>/keywords.json` exist. The
    script exits 2 naming the command to run if either is missing.
+3. For the facts stage, `briefs/_ingest/<slug>.txt` from `/seo-ingest` if the
+   user has a source document. Without it the facts list is written empty with no
+   model call, which is correct for a page with no business specifics. Tell the
+   user that is what will happen, and offer `/seo-ingest` first if they have a
+   document.
 
 ## Steps
 
@@ -47,8 +52,25 @@ and are not built yet. Say so if the user expects a brief file at the end.
    it, and show which files will go.
 5. When the user approves, run the script again for the next stage. Each stage
    sees the approved ones, so an edit carries forward.
-6. After the last built stage, say that stages 3 and 4 (targets, facts) and the
-   merge into `briefs/<slug>.json` arrive in Phase 10.
+6. After the fourth stage, merge:
+   ```bash
+   bash scripts/brief_stages.sh <slug> --merge
+   ```
+   It refuses when `briefs/<slug>.json` already exists. Show the user the existing
+   brief and ask before rerunning with `--merge --force`.
+7. The merge runs `check.sh brief` on the result. Report its WARN lines, then say:
+   *"Review `briefs/<slug>.json`, then run `/seo-outline briefs/<slug>.json`."*
+
+## What the merge does and does not carry
+
+- `word_count` is **computed**, not generated: the median of the competitor word
+  counts that were actually fetched, rounded to 50 and clamped to 600 to 3000,
+  or 1000 when no competitor page was fetched. Say which number it used and why.
+  If the user wants a different length, they edit the brief.
+- The structure stage is **not** merged. The seven-key brief has nowhere to put
+  sections, questions or gaps, so they stay in `02-structure.json` until the
+  brief schema carries them. Tell the user where to find them, because the
+  outline stage cannot see them yet.
 
 ## What to check in each stage
 
@@ -62,6 +84,15 @@ The router enforces the shape, so read for substance instead:
   `must_cover` or `competitor heading` you cannot find in `research.json`. An
   empty `faq_questions` is correct when the competitors have no question
   headings, and it means the FAQ will need real customer questions later.
+- **targets**: the keywords must be the ones in `keywords.json`. The call to
+  action is the field most likely to promise something the business does not
+  offer, such as a downloadable file or a free trial. Read it against what the
+  user actually has and say so.
+- **facts**: read `omitted` as carefully as `facts`. Design notes and marketing
+  adjectives belong there, but a real business detail can land there too, and
+  the user is the one who knows. Check every kept fact still carries its
+  qualifier ("most", "from", "up to"): a dropped qualifier is an invented
+  promise.
 
 ## Failure handling
 

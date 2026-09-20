@@ -72,7 +72,11 @@
               ]
             }
           },
-          "required": ["heading", "purpose", "source"],
+          "required": [
+            "heading",
+            "purpose",
+            "source"
+          ],
           "additionalProperties": false
         }
       },
@@ -94,7 +98,68 @@
         }
       }
     },
-    "required": ["sections", "faq_questions", "gaps"],
+    "required": [
+      "sections",
+      "faq_questions",
+      "gaps"
+    ],
+    "additionalProperties": false
+  },
+  "targets": {
+    "type": "object",
+    "properties": {
+      "keywords": {
+        "type": "array",
+        "minItems": 3,
+        "maxItems": 6,
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "cta": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 120
+      },
+      "cta_reason": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300
+      }
+    },
+    "required": [
+      "keywords",
+      "cta",
+      "cta_reason"
+    ],
+    "additionalProperties": false
+  },
+  "facts": {
+    "type": "object",
+    "properties": {
+      "facts": {
+        "type": "array",
+        "maxItems": 40,
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "omitted": {
+        "type": "array",
+        "maxItems": 10,
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      }
+    },
+    "required": [
+      "facts",
+      "omitted"
+    ],
     "additionalProperties": false
   }
 }

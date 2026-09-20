@@ -29,8 +29,21 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib_parts.sh"
 absolutes() { grep -v '^#' "$1" | grep -oiE "$ABSOLUTE_SENTENCE" || true; }
 
 brief_valid() {
+  # The seven keys are required. The four research keys are optional, so a brief
+  # written by hand or by /seo-ingest stays valid, and anything else is a typo
+  # rather than a feature.
   jq -e '
-    (keys == ["cta","facts","keywords","target_audience","tone","topic","word_count"])
+    ((keys - ["cta","facts","keywords","target_audience","tone","topic","word_count",
+              "search_intent","must_cover","questions","existing_page"]) == [])
+    and (["cta","facts","keywords","target_audience","tone","topic","word_count"] - keys == [])
+    and (if has("search_intent") then (.search_intent | type == "object"
+           and all(.type, .format, .angle; type == "string" and length > 0)) else true end)
+    and (if has("must_cover") then (.must_cover | type == "array"
+           and all(.[]; type == "string" and length > 0)) else true end)
+    and (if has("questions") then (.questions | type == "array"
+           and all(.[]; type == "string" and length > 0)) else true end)
+    and (if has("existing_page") then (.existing_page | type == "object"
+           and (.url | type == "string" and length > 0)) else true end)
     and all(.topic, .target_audience, .tone, .cta; type == "string" and length > 0)
     and (.tone | IN("Professional","Authoritative","Conversational","Friendly","Technical"))
     and (.word_count | type == "number" and . == floor and . >= 1)
@@ -61,7 +74,7 @@ case "$MODE" in
 brief)
   BRIEF="${1:?brief required}"; SOURCE="${2:-}"
   if ! brief_valid "$BRIEF"; then
-    fail "$BRIEF does not match the brief schema (7 keys, tone enum, integer word_count, 3-6 keywords, <=40 facts)"
+    fail "$BRIEF does not match the brief schema (the 7 required keys, optional search_intent/must_cover/questions/existing_page, tone enum, integer word_count, 3-6 keywords, <=40 facts)"
   else
     CTA=$(jq -r .cta "$BRIEF")
     grep -qiE '\b(below|above|click|form|button)\b' <<< "$CTA" \
