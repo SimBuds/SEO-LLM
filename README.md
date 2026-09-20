@@ -6,6 +6,8 @@ Local-first SEO content pipeline driven by **Claude Code** (CC) as the runtime a
 
 ```
 User in Claude Code
+  ├─ /seo-research <slug>                    (Phase 6 - does the page exist yet?)
+  │    └─ scripts/fetch_page.sh -> writes research/<slug>/page.json (no model call)
   ├─ /seo-ingest  <doc.docx|doc.pdf|doc.md>  (Phase 3 — optional: doc → JSON brief)
   │    └─ pandoc / pdftotext → scripts/llm_call.sh prompts/ingest.md → writes briefs/<slug>.json
   ├─ /seo-outline briefs/<brief>.json        (Phase 2 — outline first)
@@ -23,7 +25,7 @@ Every scripts/llm_call.sh call → POST localhost:8080/v1/chat/completions
   model qwen, system message prompts/system.md, thinking off
 ```
 
-Phases 1 to 5 are built. Later phases add metadata and keywords (`meta.json`), a single `/seo-generate` command, and an SEO knowledge base. See [PLAN.md](PLAN.md) for the full phase breakdown, and [Instructions.md](Instructions.md) for a step-by-step walk through every stage.
+Phases 1 to 6 are built. Phases 7 to 11 add the rest of the research stage: competitor and export collection, a keyword choice pass, and a brief built in approved stages. Later phases add metadata and keywords (`meta.json`), a single `/seo-generate` command, and an SEO knowledge base. See [PLAN.md](PLAN.md) for the full phase breakdown, and [INSTRUCTIONS.md](INSTRUCTIONS.md) for a step-by-step walk through every stage.
 
 ### Why this shape
 - **CC is the harness.** Skills replace a CLI, the Bash tool replaces a workflow engine, and files replace a database.
@@ -40,16 +42,18 @@ SEO-LLM/
 │   └── settings.json   # Bash allow-list: the five entry scripts, the router model check, jq, doc extractors
 ├── prompts/            # markdown prompt templates with {{PLACEHOLDERS}}, plus system.md (sent on every call)
 ├── scripts/
+│   ├── fetch_page.sh   # polite page fetch: robots.txt, per-host delay, HTML cache, extraction
 │   ├── llm_call.sh     # curl wrapper: prompt-file + prompts/system.md → reply on stdout
 │   ├── fill_prompt.sh  # fills a template's {{PLACEHOLDERS}} from a brief, outline, or source text
 │   ├── draft_sections.sh # section-by-section drafting loop: split, budget, call, verify, check, retry, stitch
 │   ├── rewrite_sections.sh # per-part readability edit with guards and re-verification, stitched into final.md
 │   ├── lib_parts.sh      # shared helpers: fact verification, heading restore, unbold, draft_factor
 │   └── check.sh        # deterministic checks on a brief, outline, or draft (FAIL/WARN lines)
+├── research/           # per-page research: <slug>/page.json, inputs/, _cache/ (cache gitignored)
 ├── briefs/             # user inputs (JSON)
 ├── outputs/            # generated articles, one directory per brief (gitignored)
 ├── AGENTS.md           # workflow contract for any AI agent in this repo
-├── Instructions.md     # stage-by-stage walk through the whole pipeline
+├── INSTRUCTIONS.md     # stage-by-stage walk through the whole pipeline
 ├── PLAN.md             # architecture + phased MVP plan
 ├── README.md
 └── SEO-GUIDE.md        # SEO reference reading, not read by the pipeline
@@ -90,6 +94,42 @@ SEO-LLM/
    The draft needs the outline, so running `/seo-draft` first stops with a message.
    Then polish it with `/seo-rewrite briefs/example.json`.
 5. Inspect `outputs/<slug>/outline.md`, `outputs/<slug>/draft.md`, and `outputs/<slug>/final.md`.
+
+## The research stage
+
+`/seo-research <slug>` is the first stage, and it makes no model call. It asks
+whether the page already exists. Answer with a URL and it snapshots the live
+page, answer no and it records that this is a new page.
+
+```bash
+# Runs in: local terminal
+bash scripts/fetch_page.sh https://example.com/about research/about/page.json
+bash scripts/fetch_page.sh --absent research/new-service/page.json
+```
+
+`scripts/fetch_page.sh <url> [out.json]` writes the page's SEO surface as JSON:
+`title`, `meta_description`, `word_count`, and `headings` as a list of H1 to H3
+with their levels. With no output path it prints to stdout, so it can be piped.
+
+- **It obeys `robots.txt`** for the User-Agent it sends, using the standard
+  longest-match rule, and exits 3 rather than fetching a disallowed path. A
+  missing `robots.txt` means allow, as the standard says.
+- **It waits between requests to one host**, at least `FETCH_DELAY` seconds
+  (default 2) and longer when `robots.txt` asks for more.
+- **It caches the raw HTML** under `research/_cache/` for `FETCH_CACHE_TTL`
+  seconds (default 86400), so reruns and competitor collection do not re-hit a
+  site. That directory is gitignored.
+- **`FETCH_UA` sets the User-Agent**, which defaults to `SEO-LLM/1.0` with no
+  contact address. Set it to something with a contact if you fetch at volume.
+- **`FETCH_TIMEOUT`** (default 20 seconds) caps each request.
+- Exit codes: 1 the URL is not http or https, 2 the output cannot be written,
+  3 `robots.txt` disallows it, 4 an HTTP error status, 5 the response is not
+  HTML, 7 the host is unreachable. A page with no meta description or no H1 is
+  not an error, and those fields come back empty.
+
+Search engine results pages are never fetched. Ahrefs and Search Console data
+enters the pipeline as files you export into `research/<slug>/inputs/`, which
+Phase 7 will read.
 
 ## The model wrapper
 
@@ -170,6 +210,8 @@ orphan its outline.
 
 | Path | Written by | What it is |
 | --- | --- | --- |
+| `research/<slug>/page.json` | `/seo-research` | Whether the page exists, and its title, meta description, headings and word count |
+| `research/_cache/*.body` | `/seo-research` | Cached raw HTML and response status, gitignored |
 | `briefs/_ingest/<slug>.txt` | `/seo-ingest` | Plain text pulled out of the source document |
 | `briefs/_ingest/<slug>.prompt.txt` | `/seo-ingest` | The filled ingest prompt sent to the model |
 | `briefs/<slug>.json` | `/seo-ingest` | The brief, for you to review and edit |
@@ -259,7 +301,7 @@ Other things worth knowing:
 
 ## Working in this repo
 
-[AGENTS.md](AGENTS.md) is the source of truth for how work happens here. Read it before making changes. The other pillars are [PLAN.md](PLAN.md) (architecture and the phased MVP plan) and this README (user-facing and developer-facing). [Instructions.md](Instructions.md) is a companion walk-through of the pipeline and must change with it.
+[AGENTS.md](AGENTS.md) is the source of truth for how work happens here. Read it before making changes. The other pillars are [PLAN.md](PLAN.md) (architecture and the phased MVP plan) and this README (user-facing and developer-facing). [INSTRUCTIONS.md](INSTRUCTIONS.md) is a companion walk-through of the pipeline and must change with it.
 
 The fourth pillar, `IMPLEMENT.md`, is the execution tracker and holds the live state: which phase is active, what is done, what is deferred. It is untracked and gitignored on purpose, so a fresh clone has none. Its absence means no work is in flight, not that state was lost. Create it from the skeleton in `AGENTS.md` when you start a phase.
 

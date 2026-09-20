@@ -33,6 +33,7 @@ Built (one skill per stage, run in order):
 
 ```
 User in Claude Code
+  ├─ /seo-research <slug>  scripts/fetch_page.sh (no model call)              → research/<slug>/page.json
   ├─ /seo-ingest  <file>   pdftotext/pandoc + prompts/ingest.md (schema)      → briefs/<slug>.json
   ├─ /seo-outline <brief>  prompts/outline.md                                → outline.md
   ├─ /seo-draft   <brief>  scripts/draft_sections.sh: per-part call
@@ -41,7 +42,9 @@ User in Claude Code
                            (REWRITE_MODEL) + verify.md                        → rewrite/*, final.md
 ```
 
-Planned (Phases 6 and 7): a metadata and keywords pass (qwen) writing `meta.json`, and a `/seo-generate` skill that runs outline through metadata in one command.
+Planned (Phases 7 to 11): competitor and export collection, a keyword choice pass, and a staged brief builder, all feeding the same `briefs/<slug>.json`. Then (Phases 12 and 13) a metadata pass writing `meta.json`, and a `/seo-generate` skill that runs the whole pipeline in one command.
+
+The research stage ahead of ingest was added 2026-09-20. Ahrefs and Google data arrive as files the user exports, never through an API, so the pipeline needs no keys and breaks nobody's terms of service. Search engine results pages are never scraped.
 
 No Python app. No workflow engine. No SQLite.
 
@@ -52,7 +55,7 @@ No Python app. No workflow engine. No SQLite.
 ```
 SEO-LLM/
 ├── .claude/
-│   ├── skills/              # <name>/SKILL.md per command. Built: /seo-ingest, /seo-outline, /seo-draft, /seo-rewrite. Planned: /seo-metadata, /seo-keywords, /seo-generate
+│   ├── skills/              # <name>/SKILL.md per command. Built: /seo-research, /seo-ingest, /seo-outline, /seo-draft, /seo-rewrite. Planned: /seo-keywords, /seo-brief, /seo-metadata, /seo-generate
 │   └── settings.json        # allow the five entry scripts, jq, extractors, and Bash(curl -s localhost:8080/models)
 ├── prompts/
 │   ├── system.md            # system message sent on every model call
@@ -68,18 +71,20 @@ SEO-LLM/
 │   ├── metadata.md          # planned (Phase 6)
 │   └── keywords.md          # planned (Phase 6)
 ├── scripts/
+│   ├── fetch_page.sh        # polite curl fetch of one page: robots, per-host delay, cache, extract
 │   ├── llm_call.sh          # curl wrapper: prompt-file (+ optional temp/seed/schema) + prompts/system.md → stdout
 │   ├── fill_prompt.sh       # {{PLACEHOLDER}} filling from brief / outline / source text
 │   ├── draft_sections.sh    # per-part drafting loop with fact check, retry, stitch
 │   ├── rewrite_sections.sh  # per-part rewrite loop with guards and fact check
 │   ├── lib_parts.sh         # shared helpers: verify_part, heading restore, unbold, draft_factor
 │   └── check.sh             # FAIL/WARN checks for brief, outline, section, rewrite, draft
+├── research/                # <slug>/page.json, plus inputs/ and _cache/ (cache gitignored)
 ├── briefs/                  # JSON inputs
 ├── outputs/                 # <brief-slug>/{outline.md, sections/, draft.md, rewrite/, final.md}
 ├── docs/
 │   └── google/              # planned (Phase 7): helpful-content.md, eeat.md, semantic-search.md, ai-content-guidelines.md
 ├── AGENTS.md
-├── Instructions.md          # stage-by-stage walk through the pipeline
+├── INSTRUCTIONS.md          # stage-by-stage walk through the pipeline
 ├── PLAN.md
 ├── README.md
 └── SEO-GUIDE.md           # SEO reference reading, not read by the pipeline
@@ -196,11 +201,32 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - Goal: a post-draft rewrite pass reduces repetition and awkward keyword phrasing without changing facts, and writes `final.md`.
 - Model: chosen by a qwen vs gemma comparison on the three test briefs (see IMPLEMENT.md). `REWRITE_MODEL` overrides it.
 
-### Phase 6: Metadata + keywords
+### Phase 6: Page check and snapshot (done 2026-09-20)
+- Files: `scripts/fetch_page.sh`, `.claude/skills/seo-research/SKILL.md`, `.gitignore`, `PLAN.md`, `README.md`.
+- Goal: `/seo-research <slug>` asks whether the page exists and writes `research/<slug>/page.json`, snapshotting the live page when there is one.
+- The fetcher honors `robots.txt`, sends a configurable User-Agent (`FETCH_UA`, no contact address by default), keeps a per-host delay, and caches raw HTML so a rerun does not hit the host again.
+
+### Phase 7: Research collection
+- Files: `scripts/research_collect.sh`, `scripts/check.sh`, the `seo-research` skill.
+- Goal: Ahrefs and Search Console exports in `research/<slug>/inputs/` plus competitor URLs become one `research/<slug>/research.json`.
+
+### Phase 8: Keyword choice
+- Files: `prompts/keywords.md`, `prompts/keywords.schema.json`, `.claude/skills/seo-keywords/SKILL.md`, `scripts/check.sh`.
+- Goal: `/seo-keywords <slug>` picks the primary and secondary keywords, reads the intent (type, format, angle), and scores business potential, all grounded in `research.json`.
+
+### Phases 9 and 10: Staged brief builder
+- Files: `scripts/brief_stages.sh`, `prompts/brief-intent.md`, `prompts/brief-structure.md`, `prompts/brief-targets.md`, `prompts/brief-facts.md`, `.claude/skills/seo-brief/SKILL.md`.
+- Goal: four approved stages (intent and audience, structure and gaps, keywords and length, facts and CTA) merge into `briefs/<slug>.json` in the current seven-key shape.
+
+### Phase 11: Research detail in the brief
+- Files: `prompts/brief.schema.json`, `scripts/check.sh`, `prompts/outline.md`.
+- Goal: optional `search_intent`, `must_cover`, `questions` and `existing_page` keys reach the outline, so it covers the competitor gaps.
+
+### Phase 12: Metadata + keywords
 - Files: `prompts/metadata.md`, `prompts/keywords.md`, `.claude/skills/seo-metadata/SKILL.md`, `.claude/skills/seo-keywords/SKILL.md`.
 - Goal: title, description, slug, FAQ, keyword expansion written to `meta.json`.
 
-### Phase 7: Docs + SEO knowledge base
+### Phase 13: Docs + SEO knowledge base
 - Files: `README.md`, `docs/google/{helpful-content,eeat,semantic-search,ai-content-guidelines}.md`, link from system prompt.
 - Goal: prompts ground in EEAT / helpful-content guidance, and the quickstart is documented.
 
