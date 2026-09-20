@@ -42,7 +42,7 @@ User in Claude Code
                            (REWRITE_MODEL) + verify.md                        → rewrite/*, final.md
 ```
 
-Planned (Phases 7 to 11): competitor and export collection, a keyword choice pass, and a staged brief builder, all feeding the same `briefs/<slug>.json`. Then (Phases 12 and 13) a metadata pass writing `meta.json`, and a `/seo-generate` skill that runs the whole pipeline in one command.
+Phases 6 to 13 are built, so the research stage runs end to end: page check, competitor and export collection, keyword choice, a staged brief builder, and the research detail reaching the outline. Planned next are a metadata pass writing `meta.json` (Phase 14), and an SEO knowledge base grounding the prompts in `SEO-GUIDE.md` plus a `/seo-generate` skill (Phase 15).
 
 The research stage ahead of ingest was added 2026-09-20. Ahrefs and Google data arrive as files the user exports, never through an API, so the pipeline needs no keys and breaks nobody's terms of service. Search engine results pages are never scraped.
 
@@ -87,7 +87,7 @@ SEO-LLM/
 ├── INSTRUCTIONS.md          # stage-by-stage walk through the pipeline
 ├── PLAN.md
 ├── README.md
-└── SEO-GUIDE.md           # SEO reference reading, not read by the pipeline
+└── SEO-GUIDE.md           # the SEO reference behind the pipeline (no script parses it, but check.sh mirrors its targets)
 ```
 
 ---
@@ -211,15 +211,15 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - Goal: `/seo-research <slug>` asks whether the page exists and writes `research/<slug>/page.json`, snapshotting the live page when there is one.
 - The fetcher honors `robots.txt`, sends a configurable User-Agent (`FETCH_UA`, no contact address by default), keeps a per-host delay, and caches raw HTML so a rerun does not hit the host again.
 
-### Phase 7: Research collection
+### Phase 7: Research collection (done 2026-09-20)
 - Files: `scripts/research_collect.sh`, `scripts/check.sh`, the `seo-research` skill.
 - Goal: Ahrefs and Search Console exports in `research/<slug>/inputs/` plus competitor URLs become one `research/<slug>/research.json`.
 
-### Phase 8: Keyword choice
+### Phase 8: Keyword choice (done 2026-09-20)
 - Files: `prompts/keywords.md`, `prompts/keywords.schema.json`, `.claude/skills/seo-keywords/SKILL.md`, `scripts/check.sh`.
 - Goal: `/seo-keywords <slug>` picks the primary and secondary keywords, reads the intent (type, format, angle), and scores business potential, all grounded in `research.json`.
 
-### Phases 9 and 10: Staged brief builder
+### Phases 9 and 10: Staged brief builder (done 2026-09-20)
 - Files: `scripts/brief_stages.sh`, `prompts/brief-intent.md`, `prompts/brief-structure.md`, `prompts/brief-targets.md`, `prompts/brief-facts.md`, `.claude/skills/seo-brief/SKILL.md`.
 - Goal: four approved stages (intent and audience, structure and gaps, keywords and length, facts and CTA) merge into `briefs/<slug>.json` in the current seven-key shape.
 
@@ -229,11 +229,21 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - The keys are optional, so hand-written briefs and `/seo-ingest` output stay valid. `check.sh brief` requires the seven, allows these four, and rejects anything else.
 - Observed: from the same merged brief, the outline built with the keys followed the researched subtopics and used the researched FAQ questions, while the same brief stripped of them produced a structure of the model's own invention.
 
-### Phase 12: Metadata + keywords
+### Phase 12: Punctuation fixes from the pipeline QA (done 2026-09-20)
+- Files: `scripts/lib_parts.sh`.
+- Goal: stop the verifier's punctuation tidy from deleting the space before a dotted token (".example", ".org", ".json"), and stop the absolute-wording pattern splitting a sentence inside "example.com".
+- Both were found by a full end-to-end QA run and reproduced minimally before the fix.
+
+### Phase 13: SEO-GUIDE.md expanded to baseline and intermediate (done 2026-09-20)
+- Files: `SEO-GUIDE.md`, `README.md`, `PLAN.md`.
+- Goal: the guide covers the fundamentals and the intermediate practice, so it can ground the prompts in the knowledge-base phase.
+- Added a measurement and tooling module, search intent types and SERP features, white hat against black hat, E-E-A-T, the helpful-content and AI-content position, structured data, cannibalization and topic clusters, local SEO, a measurement module, a glossary, and an appendix mapping the guide to the pipeline. Its title, meta description and competitor-count targets are mirrored in `scripts/check.sh`, so they are locked.
+
+### Phase 14: Metadata + keywords
 - Files: `prompts/metadata.md`, `prompts/keywords.md`, `.claude/skills/seo-metadata/SKILL.md`, `.claude/skills/seo-keywords/SKILL.md`.
 - Goal: title, description, slug, FAQ, keyword expansion written to `meta.json`.
 
-### Phase 13: Docs + SEO knowledge base
+### Phase 15: Docs + SEO knowledge base
 - Files: `README.md`, `docs/google/{helpful-content,eeat,semantic-search,ai-content-guidelines}.md`, link from system prompt.
 - Goal: prompts ground in EEAT / helpful-content guidance, and the quickstart is documented.
 

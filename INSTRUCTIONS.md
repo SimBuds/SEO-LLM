@@ -138,6 +138,33 @@ Editing a stage file is usually better than rerunning it, because a rerun is a f
 6. **Output:** the parts are joined into `final.md`, and `check.sh draft` runs against the real target. Rerunning skips edits that are newer than their input and still pass. `--fresh` redoes every part.
 7. **Final review:** Claude Code compares `final.md` with `draft.md` and the facts. It notes which rejected issues were fixed and any claim the facts don't support.
 
+## The menu
+
+`bash scripts/seo.sh [slug]` runs the whole thing from one place. It reads each
+stage's state from the files on disk, so it always knows what is done, what is
+ready and what is blocked, and picking a number runs that stage.
+
+```
+SEO pipeline: example-domains
+router: serving qwen
+
+  1 [done   ] Page check         live page, title 62 chars, 268 words
+  2 [done   ] Collect research   4 keywords, 2/2 competitors, 2 exports
+  3 [ready  ] Keyword choice       <- next
+  4 [blocked] Brief stages       needs keywords.json
+```
+
+All nine stages run from the menu, and `a` runs every ready one in turn. It
+stops before the two stages that need you (the page check wants a URL or a no,
+the collection wants your exports and competitor URLs), stops after each brief
+stage so you read it before the next, and stops at the first failure. From a
+finished brief, one `a` takes you through the outline, the draft, the rewrite
+and the review.
+
+The menu asks the page purpose once and reuses it, checks the router before any
+model call, offers a reseed when a check fails rather than retrying behind your
+back, and always asks before replacing an artifact.
+
 ## Shared pieces
 
 - **`scripts/llm_call.sh`:** the only way to reach the model.
@@ -147,6 +174,7 @@ Editing a stage file is usually better than rerunning it, because a rerun is a f
   - `LLM_MODEL`, `LLM_MAX_TOKENS` and `LLM_TIMEOUT` change the model, output limit and timeout.
 - **`scripts/fetch_page.sh`:** the only way this repo reaches the open web. It obeys `robots.txt`, waits between requests to one host, caches the HTML in `research/_cache/`, and pulls out the title, meta description, headings and word count. `FETCH_UA` sets the User-Agent, which carries no contact address by default.
 - **`scripts/research_collect.sh`:** merges your keyword exports by column name and fetches the competitor URLs into one `research.json`.
+- **`scripts/seo.sh`:** the interactive menu. It runs the other scripts and reads state from the artifacts, so it holds no state of its own.
 - **`scripts/brief_stages.sh`:** one model call per brief stage, stopping after each for your approval, then `--merge` assembles `briefs/<slug>.json` and computes the word count from the competitor median.
 - **`scripts/fill_prompt.sh`:** fills every prompt from the brief, outline and source text, and fails if a placeholder is left unfilled.
 - **`scripts/check.sh`:** holds every rule (research, brief, outline, section, draft, rewrite). A problem that must be fixed is a FAIL. One worth a look is a WARN.

@@ -11,7 +11,11 @@
       "Bash(curl -s localhost:8080/models)",
       "Bash(jq:*)",
       "Bash(pandoc:*)",
-      "Bash(pdftotext:*)"
+      "Bash(pdftotext:*)",
+      "Bash(bash scripts/seo.sh:*)",
+      "Bash(bash scripts/fetch_page.sh:*)",
+      "Bash(bash scripts/research_collect.sh:*)",
+      "Bash(bash scripts/brief_stages.sh:*)"
     ]
   }
 }

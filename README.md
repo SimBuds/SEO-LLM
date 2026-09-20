@@ -51,6 +51,7 @@ SEO-LLM/
 │   └── settings.json   # Bash allow-list: the five entry scripts, the router model check, jq, doc extractors
 ├── prompts/            # markdown prompt templates with {{PLACEHOLDERS}}, plus system.md (sent on every call)
 ├── scripts/
+│   ├── seo.sh          # interactive menu: stage status from disk, runs the stage you pick
 │   ├── fetch_page.sh   # polite page fetch: robots.txt, per-host delay, HTML cache, extraction
 │   ├── research_collect.sh # exports + competitor pages → research/<slug>/research.json
 │   ├── brief_stages.sh # one model call per brief stage, then the merge into briefs/<slug>.json
@@ -67,7 +68,7 @@ SEO-LLM/
 ├── INSTRUCTIONS.md     # stage-by-stage walk through the whole pipeline
 ├── PLAN.md             # architecture + phased MVP plan
 ├── README.md
-└── SEO-GUIDE.md        # SEO reference reading, not read by the pipeline
+└── SEO-GUIDE.md        # the SEO reference behind the pipeline: fundamentals, intermediate practice, glossary
 ```
 
 ## Prerequisites
@@ -105,6 +106,63 @@ SEO-LLM/
    The draft needs the outline, so running `/seo-draft` first stops with a message.
    Then polish it with `/seo-rewrite briefs/example.json`.
 5. Inspect `outputs/<slug>/outline.md`, `outputs/<slug>/draft.md`, and `outputs/<slug>/final.md`.
+
+## The menu
+
+`scripts/seo.sh` is the interactive front door. It shows every stage of a page
+with its state and runs the one you pick.
+
+```bash
+# Runs in: local terminal
+bash scripts/seo.sh                 # lists the pages that have research, or starts one
+bash scripts/seo.sh example-domains # straight to that page
+```
+
+```
+SEO pipeline: example-domains
+router: serving qwen
+
+  1 [done   ] Page check         live page, title 62 chars, 268 words, no description
+  2 [done   ] Collect research   4 keywords, 2/2 competitors, 2 exports
+  3 [ready  ] Keyword choice       <- next
+  4 [blocked] Brief stages       needs keywords.json
+  5 [blocked] Write the brief    needs all 4 brief stages
+  6 [blocked] Outline            needs the brief
+  7 [blocked] Draft              needs the outline
+  8 [blocked] Rewrite            needs the draft
+  9 [blocked] Review             needs final.md
+
+  a run all ready stages   s switch page   q quit
+```
+
+- **State comes from the files on disk**, never from a session file, so resuming
+  a page you left last month works exactly like resuming one from five minutes
+  ago. A stage is `done` when its artifact exists, `ready` when its input does,
+  and `blocked` with the reason otherwise.
+- **A failing stage returns you to the menu** with the error visible. The menu
+  never swallows an exit code, and it prints the `check.sh` verdict for whatever
+  it ran.
+- **Every model stage checks the router first** and refuses to call when `qwen`
+  is not served, so a stage fails before it spends time rather than after.
+- **The purpose is asked once per page** and saved to
+  `research/<slug>/brief-stages/purpose.txt`, so the keyword choice and all four
+  brief stages work from the same sentence.
+- **A failed check offers a reseed rather than retrying silently.** The keyword
+  stage offers seed 2, the outline stage offers seeds 2 and 3, and each one says
+  what to do when the retries are exhausted.
+- **Replacing an artifact always asks**, and replacing a brief says plainly that
+  your edits go with it.
+- **`a` runs every ready stage in turn.** It stops before a stage that needs you
+  to type or place something (the page check and the research collection), stops
+  after each brief stage so you read it, and stops at the first failure. From a
+  finished brief it will take you to `final.md` in one keypress.
+- **The review stage** lists the claims the fact checker flagged but could not
+  safely fix, which are still in the article, alongside the brief target and the
+  draft and final word counts.
+- `RESEARCH_DIR`, `BRIEFS_DIR` and `OUTPUTS_DIR` relocate the whole tree, which
+  is how a test run stays out of the real directories.
+- It needs a terminal. Piped or redirected, it prints the status table once and
+  exits, so it is safe in a script that just wants the state.
 
 ## The research stage
 
