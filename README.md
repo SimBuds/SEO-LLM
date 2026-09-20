@@ -6,8 +6,13 @@ Local-first SEO content pipeline driven by **Claude Code** (CC) as the runtime a
 
 ```
 User in Claude Code
-  ├─ /seo-research <slug>                    (Phase 6 - does the page exist yet?)
-  │    └─ scripts/fetch_page.sh -> writes research/<slug>/page.json (no model call)
+  ├─ /seo-research <slug>                    (Phases 6-7 - research, no model call)
+  │    ├─ scripts/fetch_page.sh        -> research/<slug>/page.json
+  │    └─ scripts/research_collect.sh  -> research/<slug>/research.json
+  │         from inputs/*.csv (your exports) + competitors.txt (URLs you list)
+  ├─ /seo-keywords <slug>                    (Phase 8 - what does this page target?)
+  │    └─ scripts/llm_call.sh prompts/keywords.md (schema-constrained)
+  │         └─ writes research/<slug>/keywords.json
   ├─ /seo-ingest  <doc.docx|doc.pdf|doc.md>  (Phase 3 — optional: doc → JSON brief)
   │    └─ pandoc / pdftotext → scripts/llm_call.sh prompts/ingest.md → writes briefs/<slug>.json
   ├─ /seo-outline briefs/<brief>.json        (Phase 2 — outline first)
@@ -25,7 +30,7 @@ Every scripts/llm_call.sh call → POST localhost:8080/v1/chat/completions
   model qwen, system message prompts/system.md, thinking off
 ```
 
-Phases 1 to 6 are built. Phases 7 to 11 add the rest of the research stage: competitor and export collection, a keyword choice pass, and a brief built in approved stages. Later phases add metadata and keywords (`meta.json`), a single `/seo-generate` command, and an SEO knowledge base. See [PLAN.md](PLAN.md) for the full phase breakdown, and [INSTRUCTIONS.md](INSTRUCTIONS.md) for a step-by-step walk through every stage.
+Phases 1 to 8 are built. Phases 9 to 11 add a brief built in approved stages. Later phases add metadata and keywords (`meta.json`), a single `/seo-generate` command, and an SEO knowledge base. See [PLAN.md](PLAN.md) for the full phase breakdown, and [INSTRUCTIONS.md](INSTRUCTIONS.md) for a step-by-step walk through every stage.
 
 ### Why this shape
 - **CC is the harness.** Skills replace a CLI, the Bash tool replaces a workflow engine, and files replace a database.
@@ -43,6 +48,7 @@ SEO-LLM/
 ├── prompts/            # markdown prompt templates with {{PLACEHOLDERS}}, plus system.md (sent on every call)
 ├── scripts/
 │   ├── fetch_page.sh   # polite page fetch: robots.txt, per-host delay, HTML cache, extraction
+│   ├── research_collect.sh # exports + competitor pages → research/<slug>/research.json
 │   ├── llm_call.sh     # curl wrapper: prompt-file + prompts/system.md → reply on stdout
 │   ├── fill_prompt.sh  # fills a template's {{PLACEHOLDERS}} from a brief, outline, or source text
 │   ├── draft_sections.sh # section-by-section drafting loop: split, budget, call, verify, check, retry, stitch
@@ -127,9 +133,49 @@ with their levels. With no output path it prints to stdout, so it can be piped.
   HTML, 7 the host is unreachable. A page with no meta description or no H1 is
   not an error, and those fields come back empty.
 
-Search engine results pages are never fetched. Ahrefs and Search Console data
-enters the pipeline as files you export into `research/<slug>/inputs/`, which
-Phase 7 will read.
+### Collecting the research
+
+`scripts/research_collect.sh <slug> [--fresh]` turns what you gathered into one
+`research/<slug>/research.json`. It needs `page.json` and exits 2 without it.
+
+- **Keyword exports** go in `research/<slug>/inputs/` as CSV or TSV. Columns are
+  read by name, so an Ahrefs keyword export (`Keyword`, `Volume`, `Difficulty`,
+  `Traffic potential`, `CPC`, `Parent topic`) and a Search Console query export
+  (`Top queries`, `Clicks`, `Impressions`, `CTR`, `Position`) both work as
+  downloaded. Quoted fields containing commas are handled, a tab-separated file
+  named `.csv` is detected, and `%` and thousands separators are stripped from
+  numbers. Rows are merged by keyword, and each keyword lists the files it came
+  from. An export with no recognizable keyword column exits 3 and prints the
+  columns it saw rather than writing empty rows.
+- **Competitors** go in `research/<slug>/competitors.txt`, one URL per line with
+  `#` comments allowed. Each is fetched through `fetch_page.sh`, so robots.txt,
+  the delay and the cache all apply. One that cannot be fetched is recorded with
+  its reason and does not stop the others.
+- `check.sh research` FAILs only on a broken shape. Thin research (no exports, no
+  competitors, fewer than the 3 to 5 pages SEO-GUIDE.md asks for) is a WARN,
+  because a topic with no tool data is a real case.
+
+Search engine results pages are never fetched, and no Ahrefs or Google API is
+called. Tool data enters the pipeline only as files you export.
+
+### Choosing the target keyword
+
+`/seo-keywords <slug>` makes one schema-constrained call (temperature 0.2, seed 1)
+against `research.json` plus a one-line description of what the page is for, and
+writes `research/<slug>/keywords.json`: the primary keyword, 2 to 6 secondary
+keywords, the intent (type, format, angle), a business-potential score of 0 to 3,
+the questions the ranking pages answer, and the subtopics they share.
+
+The guard that matters is grounding. `check.sh keywords` FAILs when any keyword
+returned is absent from the research file, comparing against the keyword table,
+the competitor titles and headings, and the existing page. A reworded keyword
+fails the same way an invented one does, because "checklist for technical seo" is
+a different query from "technical seo checklist". The prompt also forbids
+restating the research figures, so volumes and difficulties stay in
+`research.json` where they can be audited, and a repeated figure is a WARN.
+
+The word-count target is not set here. It comes from the competitor word counts
+at the brief stage.
 
 ## The model wrapper
 
@@ -196,6 +242,8 @@ The edit is checked against its input with `check.sh rewrite`: identical heading
 | `outline <outline.md> <brief.json>` | not exactly one H1, missing FAQ/Conclusion, any body text, an H2 without an Intent line | section or FAQ counts outside the size table, H3s under Conclusion, lowercase keyword pasted into a heading |
 | `section <part.md> <block.md or -> <words> <brief.json>` | headings differ from the block (or any heading in the intro), guidance lines or code fence left in, CTA missing from the conclusion | words outside 60 to 125% of the budget, bolded keyword |
 | `rewrite <new.md> <old.md> <brief.json>` | headings changed, length outside 50 to 120%, CTA added where there was none, numbers absent from the input and facts, more absolute-wording sentences, CTA sentence lost | bold left in |
+| `research <research.json>` | the file does not match the expected shape | no keywords, no volume column anywhere, no competitors, fewer than 3 fetched, a competitor that failed, an existing page with no title or no meta description |
+| `keywords <keywords.json> <research.json>` | the file does not match the expected shape, a keyword absent from the research, the primary keyword repeated as a secondary | no questions, fewer than 2 must-cover subtopics, research figures repeated in the reasoning, a live page whose title does not contain the chosen keyword |
 | `draft <draft.md> <outline.md> <brief.json> [percent]` (`draft` for `draft.md`) | H1/H2 differ from the outline, outline guidance lines left in | length outside ±15%, CTA missing from Conclusion, a keyword used more than twice, bolded keywords, numbers not in the facts or outline, sentences with absolute wording (all, every, guaranteed…) |
 
 The checks catch structure and invented digits, not invented prose. The skills therefore also ask Claude Code to audit facts against the source (ingest) or the brief's `facts` (draft) and report anything added or strengthened.
@@ -211,6 +259,11 @@ orphan its outline.
 | Path | Written by | What it is |
 | --- | --- | --- |
 | `research/<slug>/page.json` | `/seo-research` | Whether the page exists, and its title, meta description, headings and word count |
+| `research/<slug>/inputs/*.csv` | you | Keyword and query exports, read by column name |
+| `research/<slug>/competitors.txt` | you | Competitor URLs, one per line |
+| `research/<slug>/research.json` | `/seo-research` | The collected research: merged keywords, competitor pages, the existing page |
+| `research/<slug>/_keywords_prompt.txt` | `/seo-keywords` | The filled keyword prompt |
+| `research/<slug>/keywords.json` | `/seo-keywords` | The target keyword, intent, business potential, questions and subtopics |
 | `research/_cache/*.body` | `/seo-research` | Cached raw HTML and response status, gitignored |
 | `briefs/_ingest/<slug>.txt` | `/seo-ingest` | Plain text pulled out of the source document |
 | `briefs/_ingest/<slug>.prompt.txt` | `/seo-ingest` | The filled ingest prompt sent to the model |

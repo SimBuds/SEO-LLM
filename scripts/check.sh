@@ -8,12 +8,14 @@
 #   check.sh draft   <draft.md> <outline.md> <brief.json> [target-percent|draft]
 #                    (defaults to 100; "draft" uses draft_factor, the aim of draft.md)
 #   check.sh rewrite <new-part.md> <old-part.md> <brief.json>
+#   check.sh research <research.json>
+#   check.sh keywords <keywords.json> <research.json>
 # Prints "FAIL: ..." for problems that must be fixed or regenerated and
 # "WARN: ..." for problems a human should look at. Exits 1 on any FAIL, else 0.
 
 set -euo pipefail
 
-MODE="${1:?mode required: brief|outline|draft}"; shift
+MODE="${1:?mode required: brief|outline|section|draft|rewrite|research|keywords}"; shift
 FAILS=0
 fail() { echo "FAIL: $*"; FAILS=$((FAILS + 1)); }
 warn() { echo "WARN: $*"; }
@@ -182,6 +184,86 @@ rewrite)
   if grep -qF "$CTA" "$OLD" && ! grep -qF "$CTA" "$NEW"; then fail "CTA sentence dropped or changed"; fi
   if ! grep -qF "$CTA" "$OLD" && grep -qF "$CTA" "$NEW"; then fail "CTA added to a part that did not have it"; fi
   grep -qE '\*\*' "$NEW" && warn "bold in rewrite"
+  ;;
+
+research)
+  # The collected research a page is planned from. Structure is a FAIL, thin
+  # research is a WARN: a topic with no tool data is a real case, and the
+  # keyword stage has to be told, not stopped.
+  RESEARCH="${1:?research.json required}"
+  jq -e '
+    (.slug | type == "string" and length > 0)
+    and (.existing_page | type == "object" and has("exists"))
+    and (.keywords | type == "array")
+    and (.competitors | type == "array")
+    and (.inputs | type == "array")
+    and all(.keywords[]; .keyword | type == "string" and length > 0)
+    and all(.competitors[]; has("url") and has("fetched"))' "$RESEARCH" > /dev/null 2>&1 \
+    || fail "research.json does not match the expected shape"
+  # The warnings below all read fields the shape check just validated.
+  (( FAILS == 0 )) || exit 1
+
+  KW=$(jq '.keywords | length' "$RESEARCH")
+  (( KW > 0 )) || warn "no keywords: add an export to inputs/ or expect the keyword stage to work from competitor pages alone"
+  WITH_VOLUME=$(jq '[.keywords[] | select(.volume != null)] | length' "$RESEARCH")
+  (( KW == 0 || WITH_VOLUME > 0 )) || warn "no keyword carries a volume: the exports look like Search Console data only"
+  OK=$(jq '[.competitors[] | select(.fetched)] | length' "$RESEARCH")
+  TOTAL=$(jq '.competitors | length' "$RESEARCH")
+  (( TOTAL > 0 )) || warn "no competitor pages: add URLs to competitors.txt for intent and gap analysis"
+  (( OK == TOTAL )) || warn "$((TOTAL - OK)) of $TOTAL competitor pages could not be fetched:"$'\n'"$(jq -r '.competitors[] | select(.fetched | not) | "  " + .url + ": " + (.error // "unknown")' "$RESEARCH")"
+  (( TOTAL == 0 || OK >= 3 )) || warn "only $OK fetched: SEO-GUIDE.md asks for the top 3 to 5 competitor pages"
+  if jq -e '.existing_page.exists' "$RESEARCH" > /dev/null; then
+    jq -e '.existing_page.title | length > 0' "$RESEARCH" > /dev/null || warn "the existing page has no title tag"
+    jq -e '.existing_page.meta_description | length > 0' "$RESEARCH" > /dev/null || warn "the existing page has no meta description"
+  fi
+  ;;
+
+keywords)
+  # The keyword choice against the research it came from. Every term must be
+  # grounded in the research file, because an invented keyword sends the whole
+  # article at a query nobody searched.
+  KEYWORDS="${1:?keywords.json required}"; RESEARCH="${2:?research.json required}"
+  jq -e '
+    (.primary_keyword | type == "string" and length > 0)
+    and (.secondary_keywords | type == "array" and length >= 2 and length <= 6
+         and all(.[]; type == "string" and length > 0))
+    and (.intent | type == "object" and has("type") and has("format") and has("angle"))
+    and (.business_potential.score | type == "number" and . >= 0 and . <= 3)
+    and (.questions | type == "array") and (.must_cover | type == "array")' \
+    "$KEYWORDS" > /dev/null 2>&1 || fail "keywords.json does not match the expected shape"
+  (( FAILS == 0 )) || exit 1
+
+  # The research as one lowercase haystack: the keyword table, the competitor
+  # titles and headings, and the existing page. A keyword the model reworded
+  # will not be found here, which is the point.
+  HAYSTACK=$(jq -r '
+    [ (.keywords[]? | .keyword, .parent_topic),
+      (.competitors[]? | .title, (.headings[]? | .text)),
+      .existing_page.title, (.existing_page.headings[]? | .text) ]
+    | map(select(. != null)) | join(" | ") | ascii_downcase' "$RESEARCH")
+  while read -r kw; do
+    [[ -n "$kw" ]] || continue
+    grep -qiF "$kw" <<< "$HAYSTACK" || fail "keyword not found in the research: $kw"
+  done < <(jq -r '.primary_keyword, .secondary_keywords[]' "$KEYWORDS")
+
+  PRIMARY=$(jq -r '.primary_keyword' "$KEYWORDS")
+  jq -e --arg p "$PRIMARY" 'all(.secondary_keywords[]; . != $p)' "$KEYWORDS" > /dev/null \
+    || fail "the primary keyword is repeated in secondary_keywords"
+
+  # Numbers the model restated instead of describing.
+  RNUM=$(jq -r '[.keywords[]? | .volume, .difficulty, .traffic_potential, .clicks, .impressions, .position] | map(select(. != null)) | .[]' "$RESEARCH" | sort -u || true)
+  if [[ -n "$RNUM" ]]; then
+    ECHOED=$(jq -r '.rationale, .business_potential.reason, (.must_cover[]?), (.questions[]?)' "$KEYWORDS" |
+             numbers | grep -xF -f <(printf '%s\n' "$RNUM") | paste -sd' ' || true)
+    [[ -z "$ECHOED" ]] || warn "research figures repeated in the reasoning (they belong in research.json only): $ECHOED"
+  fi
+
+  (( $(jq '.questions | length' "$KEYWORDS") > 0 )) || warn "no questions: the FAQ section will have nothing to answer"
+  (( $(jq '.must_cover | length' "$KEYWORDS") >= 2 )) || warn "fewer than 2 must_cover subtopics: the outline will be thin"
+  if jq -e '.existing_page.exists' "$RESEARCH" > /dev/null; then
+    TITLE=$(jq -r '.existing_page.title // ""' "$RESEARCH")
+    grep -qiF "$PRIMARY" <<< "$TITLE" || warn "the live page's title does not contain the chosen primary keyword, so this is a retarget: $TITLE"
+  fi
   ;;
 
 *) echo "unknown mode: $MODE" >&2; exit 2 ;;

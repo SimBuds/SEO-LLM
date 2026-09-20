@@ -1,6 +1,6 @@
 ---
 name: seo-research
-description: Start a page's research folder by asking whether the page already exists and, when it does, snapshotting the live page (title, meta description, headings, word count) with scripts/fetch_page.sh. Phase 6 stage, the first step before keywords and the brief. Use when the user runs /seo-research <slug> or asks to research a page before writing it.
+description: Research a page before it is written. Asks whether the page already exists and snapshots it, then collects the keyword exports the user downloaded and the competitor pages they named into one research.json. Phases 6 and 7, the first stage of the pipeline. Use when the user runs /seo-research <slug> or asks to research a page before writing it.
 ---
 
 # seo-research
@@ -35,11 +35,35 @@ This is the first stage of the pipeline, ahead of `/seo-keywords` and
      description is present and its length, the heading outline, and the word
      count. Name anything off the SEO-GUIDE.md targets, which are a title of 50
      to 60 characters, a meta description of 150 to 160, and exactly one H1.
-7. Close with: *"Next: add the Ahrefs and Search Console exports to
-   `research/<slug>/inputs/`, then run `/seo-keywords <slug>`."* Say plainly that
-   those later stages are not built yet if the user asks to run them.
+7. Ask for the research inputs, both optional:
+   - **Keyword exports** in `research/<slug>/inputs/`. Any CSV or TSV whose
+     columns are read by name, so an Ahrefs keyword export and a Search Console
+     query export both work unchanged. Tell the user to drop the files in and
+     say when they are there.
+   - **Competitors** in `research/<slug>/competitors.txt`, one URL per line,
+     `#` comments allowed. SEO-GUIDE.md asks for the top 3 to 5 ranking pages
+     for the target query. The user finds them in Google. Never fetch a search
+     engine results page to find them yourself.
+8. Collect: `bash scripts/research_collect.sh <slug>`. It merges the exports by
+   keyword, fetches each competitor through `scripts/fetch_page.sh`, and writes
+   `research/<slug>/research.json`. A competitor that cannot be fetched is
+   recorded with its reason and does not stop the run. Add `--fresh` to ignore
+   the HTML cache.
+9. Check: `bash scripts/check.sh research research/<slug>/research.json`.
+10. Report, reading the research file rather than the terminal summary:
+   - how many keywords came from which export, and the highest-volume few
+   - the competitor pages fetched, with their word counts and their H2 outlines,
+     since those are the gaps the page has to cover
+   - every WARN line, and any competitor that failed with its reason
+11. Close with: *"Next: `/seo-keywords <slug>`."* If the user asks to run it, say
+   that stage is not built yet.
 
 ## Failure handling
+
+`scripts/research_collect.sh` exits 2 when `page.json` is missing (run step 4 or
+5 first) and 3 when an export has no keyword column, printing the columns it saw.
+Show the user those columns and ask which one holds the keyword, rather than
+editing their export.
 
 `scripts/fetch_page.sh` exits with a specific code and prints the reason. Report
 it, and do not retry with a different tool or fetch the page another way.
@@ -55,7 +79,7 @@ it, and do not retry with a different tool or fetch the page another way.
 
 ## Out of scope
 
-No competitor pages, no Ahrefs or Search Console exports, no keyword choice, and
-no brief. Those are `/seo-keywords` and `/seo-brief`, which are not built yet.
-Never fetch a search engine results page: the pipeline takes tool data from the
-files the user exports, not by scraping.
+No keyword choice and no brief: those are `/seo-keywords` and `/seo-brief`, which
+are not built yet. Never fetch a search engine results page, and never call an
+Ahrefs or Google API. Tool data enters this pipeline only as files the user
+exports.

@@ -1,0 +1,100 @@
+{
+  "_comment": "One schema per brief stage, keyed by stage name. scripts/brief_stages.sh extracts the stage's own object with jq and passes that to scripts/llm_call.sh, because response_format takes one concrete schema per call.",
+  "intent": {
+    "type": "object",
+    "properties": {
+      "topic": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 120
+      },
+      "target_audience": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "reader_goal": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 400
+      },
+      "tone": {
+        "type": "string",
+        "enum": [
+          "Professional",
+          "Authoritative",
+          "Conversational",
+          "Friendly",
+          "Technical"
+        ]
+      },
+      "tone_reason": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 400
+      }
+    },
+    "required": [
+      "topic",
+      "target_audience",
+      "reader_goal",
+      "tone",
+      "tone_reason"
+    ],
+    "additionalProperties": false
+  },
+  "structure": {
+    "type": "object",
+    "properties": {
+      "sections": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 8,
+        "items": {
+          "type": "object",
+          "properties": {
+            "heading": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "purpose": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "must_cover",
+                "competitor heading",
+                "page purpose"
+              ]
+            }
+          },
+          "required": ["heading", "purpose", "source"],
+          "additionalProperties": false
+        }
+      },
+      "faq_questions": {
+        "type": "array",
+        "maxItems": 8,
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "gaps": {
+        "type": "array",
+        "maxItems": 6,
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      }
+    },
+    "required": ["sections", "faq_questions", "gaps"],
+    "additionalProperties": false
+  }
+}

@@ -1,8 +1,11 @@
 # Pipeline flow
 
-The pipeline has four commands, run in order in Claude Code. Each one writes files that the next one reads.
+The pipeline has five commands, run in order in Claude Code. Each one writes files that the next one reads.
 
 ```
+/seo-research <slug>  ──▶ research/<slug>/page.json + research.json
+   │  (does the page exist? your keyword exports, the competitor pages)
+   ▼
 source doc (.pdf/.docx/.md/.txt)
    │  /seo-ingest <file>
    ▼
@@ -18,7 +21,7 @@ outputs/<slug>/sections/*  →  draft.md  │  all stages read the brief's `fact
 outputs/<slug>/rewrite/*   →  final.md ◀┘
 ```
 
-The `<slug>` is the brief's file name without `.json`, so a document, its brief and its outputs all share one name.
+The `<slug>` is the brief's file name without `.json`, so a page's research, its document, its brief and its outputs all share one name.
 
 ## 0. Before you start
 
@@ -32,7 +35,20 @@ The `<slug>` is the brief's file name without `.json`, so a document, its brief 
 2. **Claude Code is open in this repo**, with the trust dialog accepted, so the `/seo-*` commands resolve and the scripts run without a prompt each time.
 3. **A brief exists**, either written by hand (copy `briefs/example.json`) or made by `/seo-ingest`. A hand-written brief skips step 1 below.
 
-## 1. `/seo-ingest <file>`: document → brief
+## 1. `/seo-research <slug>`: research before writing
+
+No model call in this stage. It gathers what the page has to beat.
+
+1. **Does the page exist?** The command asks. Give a URL and it snapshots the live page: title, meta description, H1 to H3 and word count, into `research/<slug>/page.json`. Say no and it records a new page.
+2. **Your exports.** Drop the Ahrefs keyword export and the Search Console query export into `research/<slug>/inputs/`. Columns are read by name, so download and drop, with no reshaping. Nothing is fetched from Ahrefs or Google, and no API key exists anywhere in this repo.
+3. **Competitors.** Put the top 3 to 5 ranking URLs into `research/<slug>/competitors.txt`, one per line. You find them in Google, because the pipeline never fetches a results page.
+4. **Collect:** `scripts/research_collect.sh` merges the exports by keyword, fetches each competitor (obeying `robots.txt`, waiting between requests to one host, caching the HTML), and writes `research/<slug>/research.json`.
+5. **`check.sh research`:**
+   - **Fails** only when the file's shape is broken.
+   - **Warns** on thin research: no keywords, no competitors, fewer than three fetched, or an existing page missing its title or meta description.
+6. **Your review:** read the competitor word counts and their H2 outlines. They set the length and the sections the page has to cover.
+
+## 2. `/seo-ingest <file>`: document → brief
 
 1. **Guard:** if `briefs/<slug>.json` already exists, it asks before overwriting it.
 2. **Extract:** the text is pulled out with `pdftotext` (PDF), `pandoc` (Word, not installed yet) or a plain copy (`.md`, `.txt`) into `briefs/_ingest/<slug>.txt`. Under 50 characters stops the run, since the PDF is probably a scan.
@@ -49,7 +65,7 @@ The `<slug>` is the brief's file name without `.json`, so a document, its brief 
 6. **Fact check:** Claude Code compares each fact against the source text and lists anything added or overstated. It proposes fixes but doesn't make them.
 7. **Your review:** check and edit the brief before going on, since everything after this step is built from it.
 
-## 2. `/seo-outline <brief>`: brief → outline
+## 3. `/seo-outline <brief>`: brief → outline
 
 1. **Model call:** Qwen at temperature 0.3 writes headings only. Every section gets an `_Intent:` line and a `Keywords:` line.
 2. **Size:** the number of topic sections depends on the word count: 2 to 3 up to 1,000 words, 3 to 5 up to 1,800, and 4 to 6 above that.
@@ -58,7 +74,7 @@ The `<slug>` is the brief's file name without `.json`, so a document, its brief 
    - **Warns** on section or question counts outside the size table, subsections under the Conclusion, and keywords pasted into headings.
 4. **Retry:** on a failure, Claude Code asks whether to regenerate with seed 2 (then 3). The same seed repeats the same outline. Warnings don't block the draft.
 
-## 3. `/seo-draft <brief>`: outline → `draft.md` (`scripts/draft_sections.sh`)
+## 4. `/seo-draft <brief>`: outline → `draft.md` (`scripts/draft_sections.sh`)
 
 1. **Preconditions:** the brief passes its check and `outline.md` exists and passes its check. Otherwise the run stops and asks for `/seo-outline` first.
 2. **Split:** the outline becomes an intro plus one part per section, including the FAQ and the Conclusion.
@@ -82,7 +98,7 @@ The `<slug>` is the brief's file name without `.json`, so a document, its brief 
    - **Warns** on length, keyword overuse, bold, numbers that aren't in the facts, and absolute wording ("all", "every", "guaranteed"…).
 9. **Fact check:** Claude Code lists the fact-checker's rejected issues, which are still in the draft, then reviews the rest against the facts. It reports findings and doesn't edit the draft.
 
-## 4. `/seo-rewrite <brief>`: `draft.md` → `final.md` (`scripts/rewrite_sections.sh`)
+## 5. `/seo-rewrite <brief>`: `draft.md` → `final.md` (`scripts/rewrite_sections.sh`)
 
 1. **Preconditions:** `sections/00-intro.md` exists and no part is an `.ERROR.md`. Otherwise it asks for `/seo-draft` first.
 2. **Editing:** Qwen at temperature 0.7 edits each part in order with `prompts/rewrite.md`. It fixes awkward keyword phrasing, cuts filler and repetition, and fixes the fact-checker's rejected issues for that part.
@@ -105,8 +121,10 @@ The `<slug>` is the brief's file name without `.json`, so a document, its brief 
   - It checks the router's context size before every call and requires at least 32,768 tokens.
   - Thinking is off, and all sampling settings are fixed in the script.
   - `LLM_MODEL`, `LLM_MAX_TOKENS` and `LLM_TIMEOUT` change the model, output limit and timeout.
+- **`scripts/fetch_page.sh`:** the only way this repo reaches the open web. It obeys `robots.txt`, waits between requests to one host, caches the HTML in `research/_cache/`, and pulls out the title, meta description, headings and word count. `FETCH_UA` sets the User-Agent, which carries no contact address by default.
+- **`scripts/research_collect.sh`:** merges your keyword exports by column name and fetches the competitor URLs into one `research.json`.
 - **`scripts/fill_prompt.sh`:** fills every prompt from the brief, outline and source text, and fails if a placeholder is left unfilled.
-- **`scripts/check.sh`:** holds every rule (brief, outline, section, draft, rewrite). A problem that must be fixed is a FAIL. One worth a look is a WARN.
+- **`scripts/check.sh`:** holds every rule (research, brief, outline, section, draft, rewrite). A problem that must be fixed is a FAIL. One worth a look is a WARN.
 - **`scripts/lib_parts.sh`:** shared by the loops and `check.sh`. It holds the fact-check pass, heading restore, bold removal, the absolute-wording pattern and the draft multiplier.
 - **Models:** Qwen is the default everywhere. `VERIFY_MODEL=gemma` and `REWRITE_MODEL=gemma` switch those two stages. In the comparisons, Gemma was close but slightly worse.
 
@@ -114,6 +132,7 @@ The `<slug>` is the brief's file name without `.json`, so a document, its brief 
 
 | Stage | Model | Temperature | Seed | Retry |
 | --- | --- | --- | --- | --- |
+| research | none, no model call | n/a | n/a | rerun, or `--fresh` to refetch |
 | ingest | qwen | 0.2 | 1 | ask, then 0.1 |
 | outline | qwen | 0.3 | 1 | ask, then seed 2 or 3 |
 | draft part | qwen | 0.5 | 1 | automatic, seed 2 |
@@ -123,6 +142,7 @@ The `<slug>` is the brief's file name without `.json`, so a document, its brief 
 ## Typical run
 
 ```
+/seo-research client-page               # answer the page question, add exports and competitor URLs
 /seo-ingest  briefs/client-page.pdf     # then review/edit briefs/client-page.json
 /seo-outline briefs/client-page.json
 /seo-draft   briefs/client-page.json
@@ -133,6 +153,11 @@ The `<slug>` is the brief's file name without `.json`, so a document, its brief 
 
 | Path | Stage | What it is |
 | --- | --- | --- |
+| `research/<slug>/page.json` | research | Whether the page exists, and its current title, description, headings and length |
+| `research/<slug>/inputs/*.csv` | you | The keyword and query exports you downloaded |
+| `research/<slug>/competitors.txt` | you | The competitor URLs you listed |
+| `research/<slug>/research.json` | research | Merged keywords, fetched competitor pages, the existing page |
+| `research/_cache/` | research | Cached competitor HTML, gitignored |
 | `briefs/_ingest/<slug>.txt` and `.prompt.txt` | ingest | Extracted source text and the filled prompt |
 | `briefs/<slug>.json` | ingest | The brief |
 | `outputs/<slug>/_outline_prompt.txt` | outline | The filled outline prompt |
@@ -146,6 +171,7 @@ The prompt files are kept on purpose. When a result looks wrong, they show exact
 
 ## What still needs a person
 
+- **Finding the competitors.** You search Google and paste the top 3 to 5 URLs. The pipeline never fetches a results page.
 - **The brief.** The model sometimes overstates facts or turns design notes into facts.
 - **Absolute claims** that the fact-checker flagged but couldn't safely fix. List them with:
   `jq -r '.issues[]? | select(.accepted == false) | .sentence' outputs/<slug>/*/*.verify.json`
