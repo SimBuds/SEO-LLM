@@ -160,6 +160,22 @@ stage_status() { # stage_status <stage-id>; sets STATE and DETAIL
 STAGE_IDS=(page collect keywords brief_stages brief outline draft rewrite review)
 STAGE_LABELS=("Page check" "Collect research" "Keyword choice" "Brief stages" "Write the brief" "Outline" "Draft" "Rewrite" "Review")
 
+# SEO_BRIEF_ONLY=1 ends the pipeline at the brief, which is what this tool is
+# for when the human writes the page themselves. The drafting stages still work
+# and their files are left alone: they are simply not offered. Both arrays are
+# sliced together because every other part of this script indexes one by the
+# other's position.
+BRIEF_ONLY="${SEO_BRIEF_ONLY:-0}"
+if [[ "$BRIEF_ONLY" == 1 ]]; then
+  for _i in "${!STAGE_IDS[@]}"; do
+    if [[ "${STAGE_IDS[$_i]}" == brief ]]; then
+      STAGE_IDS=("${STAGE_IDS[@]:0:$((_i + 1))}")
+      STAGE_LABELS=("${STAGE_LABELS[@]:0:$((_i + 1))}")
+      break
+    fi
+  done
+fi
+
 router_line() {
   local served
   served=$(curl -s --max-time 3 "$LLM_HOST/models" 2>/dev/null | jq -r '.data[]?.id' 2>/dev/null | paste -sd' ')
@@ -190,6 +206,9 @@ render_menu() {
   done
   printf '\n  %sa%s run all ready stages   %ss%s switch page   %sq%s quit\n' \
     "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET"
+  if [[ "$BRIEF_ONLY" == 1 ]]; then
+    printf '  %sbrief-only mode: the outline, draft and rewrite stages are hidden. Unset SEO_BRIEF_ONLY for all nine.%s\n' "$DIM" "$RESET"
+  fi
 }
 
 # --- actions ----------------------------------------------------------------

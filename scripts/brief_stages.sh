@@ -33,10 +33,11 @@ MIN_WORDS=600
 MAX_WORDS=3000
 
 SLUG="${1:?usage: brief_stages.sh <slug> [--purpose \"one line\"] [--redo <stage>]}"; shift
-PURPOSE="" REDO="" MERGE=0 FORCE=0
+PURPOSE="" REDO="" MERGE=0 FORCE=0 TYPE=""
 while (( $# )); do
   case "$1" in
     --purpose) PURPOSE="${2:?--purpose needs text}"; shift 2 ;;
+    --type)    TYPE="${2:?--type needs a content type}"; shift 2 ;;
     --redo)    REDO="${2:?--redo needs a stage name}"; shift 2 ;;
     --merge)   MERGE=1; shift ;;
     --force)   FORCE=1; shift ;;
@@ -44,15 +45,38 @@ while (( $# )); do
   esac
 done
 
+# A bad type is an argument error, so it is caught before any file precondition:
+# reporting "no research.json" for a misspelled type sends the reader to the
+# wrong problem.
+if [[ -n "$TYPE" ]]; then
+  TYPE_PROMPT="prompts/brief-type-$TYPE.md"
+  [[ -r "$TYPE_PROMPT" ]] || TYPE_PROMPT="$HERE/../prompts/brief-type-$TYPE.md"
+  [[ -r "$TYPE_PROMPT" ]] || { echo "unknown content type: $TYPE (accepted: review)" >&2; exit 1; }
+fi
+
 DIR="$ROOT/$SLUG"
 STAGE_DIR="$DIR/brief-stages"
 RESEARCH="$DIR/research.json"
 KEYWORDS="$DIR/keywords.json"
 PURPOSE_FILE="$STAGE_DIR/purpose.txt"
+TYPE_FILE="$STAGE_DIR/type.txt"
 
 [[ -r "$RESEARCH" ]] || { echo "no $RESEARCH: run /seo-research $SLUG first" >&2; exit 2; }
 [[ -r "$KEYWORDS" ]] || { echo "no $KEYWORDS: run /seo-keywords $SLUG first" >&2; exit 2; }
 mkdir -p "$STAGE_DIR"
+
+# The content type is recorded once and reused, the same way the purpose is. A
+# type that changed between stages would produce a brief half-shaped as one thing
+# and half as another. Leaving it unset keeps the generic behaviour, which is
+# what seo.sh and every slug written before this flag existed do.
+if [[ -n "$TYPE" ]]; then
+  if [[ -r "$TYPE_FILE" ]] && [[ "$(cat "$TYPE_FILE")" != "$TYPE" ]]; then
+    echo "$SLUG is already recorded as $(cat "$TYPE_FILE"), not $TYPE." >&2
+    echo "A brief keeps one type. Start a new slug, or delete $TYPE_FILE and redo every stage." >&2
+    exit 1
+  fi
+  printf '%s\n' "$TYPE" > "$TYPE_FILE"
+fi
 
 # The purpose is asked once and reused, because every stage needs it and a
 # different wording between stages would quietly change the brief.
@@ -111,9 +135,6 @@ run_stage() { # run_stage <index> <stage>
     --set-file RESEARCH="$RESEARCH"
     --set-file KEYWORD_CHOICE="$KEYWORDS"
     --set PAGE_PURPOSE="$PURPOSE")
-  if [[ "$stage" == facts ]]; then
-    fill+=(--source "${BRIEFS_DIR:-briefs}/_ingest/$SLUG.txt")
-  fi
   prior=$(prior_json "$idx")
   if [[ "$prior" != "{}" ]]; then
     printf '%s\n' "$prior" | jq . > "${out%.json}.prior.json"
@@ -121,6 +142,18 @@ run_stage() { # run_stage <index> <stage>
   fi
 
   bash "$HERE/fill_prompt.sh" "${fill[@]}" > "$prompt"
+  # Only the structure stage is type-aware so far: it decides what the sections
+  # are, which is the whole difference between a review and an article. The block
+  # is appended to the filled prompt rather than filled into the template, so a
+  # run with no type produces a byte-identical prompt to before this flag existed.
+  if [[ "$stage" == structure && -r "$TYPE_FILE" ]]; then
+    local recorded type_file
+    recorded=$(cat "$TYPE_FILE")
+    type_file="prompts/brief-type-$recorded.md"
+    [[ -r "$type_file" ]] || type_file="$HERE/../prompts/brief-type-$recorded.md"
+    printf '\n' >> "$prompt"
+    cat "$type_file" >> "$prompt"
+  fi
   [[ -s "$prompt" ]] || { echo "filled prompt for $stage is empty" >&2; exit 2; }
 
   for seed in 1 2; do
@@ -128,6 +161,12 @@ run_stage() { # run_stage <index> <stage>
        && jq -e . <<< "$reply" > /dev/null 2>&1; then
       printf '%s\n' "$reply" | jq . > "$out"
       echo "wrote $out (seed $seed)" >&2
+      # The structure stage is checked as it is written, because an ungrounded
+      # section reaches the brief and then the page, and it is cheapest to catch
+      # here where a reseed is one command.
+      if [[ "$stage" == structure ]]; then
+        bash "$HERE/check.sh" stage "$out" "$RESEARCH" "$KEYWORDS" || true
+      fi
       return 0
     fi
     echo "stage $stage: unusable reply at seed $seed" >&2
@@ -176,7 +215,8 @@ merge_brief() {
     --slurpfile facts "$(stage_file 4 facts)" \
     --slurpfile keywords "$KEYWORDS" \
     --slurpfile research "$RESEARCH" \
-    --argjson words "$words" '
+    --argjson words "$words" \
+    --arg ctype "$( [[ -r "$TYPE_FILE" ]] && cat "$TYPE_FILE" || echo "" )" '
     {
       topic: $intent[0].topic,
       target_audience: $intent[0].target_audience,
@@ -189,6 +229,7 @@ merge_brief() {
       must_cover: [$structure[0].sections[].heading],
       questions: $structure[0].faq_questions
     }
+    + (if $ctype == "" then {} else {content_type: $ctype} end)
     + (if $research[0].existing_page.exists then
          {existing_page: ($research[0].existing_page
             | {url, title, word_count} | with_entries(select(.value != null)))}

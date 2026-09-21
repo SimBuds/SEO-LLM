@@ -10,12 +10,13 @@
 #   check.sh rewrite <new-part.md> <old-part.md> <brief.json>
 #   check.sh research <research.json>
 #   check.sh keywords <keywords.json> <research.json>
+#   check.sh stage    <structure-stage.json> <research.json> <keywords.json>
 # Prints "FAIL: ..." for problems that must be fixed or regenerated and
 # "WARN: ..." for problems a human should look at. Exits 1 on any FAIL, else 0.
 
 set -euo pipefail
 
-MODE="${1:?mode required: brief|outline|section|draft|rewrite|research|keywords}"; shift
+MODE="${1:?mode required: brief|outline|section|draft|rewrite|research|keywords|stage}"; shift
 FAILS=0
 fail() { echo "FAIL: $*"; FAILS=$((FAILS + 1)); }
 warn() { echo "WARN: $*"; }
@@ -29,15 +30,18 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib_parts.sh"
 absolutes() { grep -v '^#' "$1" | grep -oiE "$ABSOLUTE_SENTENCE" || true; }
 
 brief_valid() {
-  # The seven keys are required. The four research keys are optional, so a brief
-  # written by hand or by /seo-ingest stays valid, and anything else is a typo
-  # rather than a feature.
+  # The seven keys are required. The four research keys and content_type are
+  # optional, so a brief written by hand or by /seo-ingest stays valid, and
+  # anything else is a typo rather than a feature.
   jq -e '
     ((keys - ["cta","facts","keywords","target_audience","tone","topic","word_count",
-              "search_intent","must_cover","questions","existing_page"]) == [])
+              "search_intent","must_cover","questions","existing_page",
+              "content_type"]) == [])
     and (["cta","facts","keywords","target_audience","tone","topic","word_count"] - keys == [])
     and (if has("search_intent") then (.search_intent | type == "object"
            and all(.type, .format, .angle; type == "string" and length > 0)) else true end)
+    and (if has("content_type") then
+           (.content_type as $c | ["review","roundup","guide"] | index($c) != null) else true end)
     and (if has("must_cover") then (.must_cover | type == "array"
            and all(.[]; type == "string" and length > 0)) else true end)
     and (if has("questions") then (.questions | type == "array"
@@ -254,6 +258,67 @@ research)
   if (( OWN > 0 )); then
     warn "$OWN of your own pages already target a researched query, so consider updating one instead of adding another:"$'\n'"$(jq -r '.site_pages.matching[] | "  \(.keyword): \(.url)"' "$RESEARCH" | head -5)"
   fi
+  ;;
+
+stage)
+  # A structure stage against the research it claims to come from. This is the
+  # grounding check: a section whose `source` names evidence that is not really
+  # in research.json or keywords.json is invented, however plausible it reads.
+  # Before this mode existed, `source` held a bare category ("must_cover") that
+  # matched everything and therefore verified nothing.
+  STAGE="${1:?structure stage json required}"; RESEARCH="${2:?research.json required}"; KEYWORDS="${3:?keywords.json required}"
+  jq -e '(.sections | type == "array" and length > 0)
+    and all(.sections[]; (.heading | type == "string" and length > 0)
+                     and (.purpose | type == "string" and length > 0)
+                     and (.source  | type == "string" and length > 0))' \
+    "$STAGE" > /dev/null 2>&1 || fail "$STAGE is not a structure stage with sections"
+  (( FAILS == 0 )) || exit 1
+
+  # Same haystack the keywords mode uses, widened with the keyword stage's own
+  # must_cover and questions, because those are where a must_cover source comes
+  # from.
+  HAYSTACK=$( { jq -r '
+      [ (.keywords[]? | .keyword, .parent_topic),
+        (.competitors[]? | .title, (.headings[]? | .text)),
+        .existing_page.title, (.existing_page.headings[]? | .text) ]
+      | map(select(. != null)) | join(" | ")' "$RESEARCH"
+    jq -r '[ (.must_cover[]?), (.questions[]?), .primary_keyword, (.secondary_keywords[]?) ]
+      | map(select(. != null)) | join(" | ")' "$KEYWORDS"; } | tr '\n' ' ' | tr '[:upper:]' '[:lower:]')
+
+  while IFS= read -r src; do
+    [[ -n "$src" ]] || continue
+    kind=${src%%:*}
+    kind=$(tr '[:upper:]' '[:lower:]' <<< "${kind}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')
+    # "page purpose" traces to purpose.txt rather than to the research, so it
+    # carries no evidence and is accepted as written.
+    [[ "$kind" == "page purpose" ]] && continue
+    case "$kind" in
+      must_cover|"competitor heading") ;;
+      *) fail "source names an unknown kind (expected must_cover, competitor heading or page purpose): $src"; continue ;;
+    esac
+    if [[ "$src" != *:* ]]; then
+      fail "source names a kind but no evidence, so it cannot be traced: $src"
+      continue
+    fi
+    evidence=$(sed -E 's/^[^:]*:[[:space:]]*//' <<< "$src" | sed -E 's/[[:space:]]+$//')
+    if [[ -z "$evidence" ]]; then
+      fail "source names a kind but no evidence, so it cannot be traced: $src"
+    elif ! grep -qiF "$evidence" <<< "$HAYSTACK"; then
+      fail "section source is not in the research, so the section is invented or reworded: $src"
+    fi
+  done < <(jq -r '.sections[].source' "$STAGE")
+
+  # "page purpose" is the one source that carries no evidence, so a stage that
+  # leans on it is mostly ungrounded even when every traceable source checks out.
+  # A review spine legitimately uses it for the verdict and the testing section,
+  # so this is a warning about proportion rather than a failure.
+  SECTIONS=$(jq '.sections | length' "$STAGE")
+  PURPOSED=$(jq '[.sections[] | select(.source | ascii_downcase | . == "page purpose")] | length' "$STAGE")
+  if (( SECTIONS > 0 && PURPOSED * 2 > SECTIONS )); then
+    warn "$PURPOSED of $SECTIONS sections trace only to the page purpose, not to the research, so most of this structure is ungrounded"
+  fi
+
+  (( $(jq '.faq_questions | length' "$STAGE") > 0 )) || warn "no faq_questions: the research had none to draw on"
   ;;
 
 keywords)

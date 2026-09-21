@@ -275,6 +275,26 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - `canonical_header` now keeps the first column that claims a canonical name and drops later duplicates. An Ahrefs SERP overview carries both `Keyword` and `Keywords`, where the second counts the keywords a URL ranks for, so every keyword arrived as a number ("91", "54", "488"). The same file carries `Volume` and `Global volume`, and first-wins now takes the country figure rather than the global one.
 - The measured-data test in `check.sh` no longer counts `position` as evidence. Search Console reports a position, but so does an Ahrefs SERP overview, where it is somebody else's rank. Reading it as first-party data made the check go silent on a file with no first-party data in it. Impressions and clicks carry no such collision, so the test is now those two. `prompts/keywords.md` Case A and B match.
 - Verified against both real exports: the organic keywords file is unchanged at 73 keywords, the SERP overview went from 8 keywords (7 of them numeric) to 1, and from silent to correctly reporting estimated data. All five Phase 28 fixtures unchanged.
+
+### Phase 30: Briefs carry a content type, starting with review (done 2026-09-21)
+- Files: `scripts/brief_stages.sh`, `scripts/check.sh`, `prompts/brief.schema.json`, `prompts/brief-type-review.md`.
+- `brief_stages.sh --type review` records the type once in `brief-stages/type.txt`, the same record-once rule as `purpose.txt`, and refuses to change it on a slug that already has one.
+- The type block is **appended to the filled prompt**, not templated into `prompts/brief-structure.md`. That keeps the template untouched, so a run with no type is byte-identical to before the flag existed rather than merely similar. An earlier attempt did template a `{{CONTENT_TYPE}}` placeholder in and left two blank lines of difference.
+- The review block's rule is that the model has not used the product and knows nothing about it, so each section's `purpose` is an instruction to Casey about what to record. Measured against an untyped run on the same research: typed put the verdict first and added how-we-tested and who-it-suits, untyped put the verdict last and invented a "Manufacturer Background" section the research does not support.
+- `content_type` is optional in `brief.schema.json` and in `check.sh brief`, so every brief written before this phase stays valid. The check was shown to FAIL on an out-of-enum value.
+
+### Phase 31: The structure stage is checked against the research it claims (done 2026-09-21)
+- Files: `scripts/check.sh`, `scripts/brief_stages.sh`, `prompts/brief-structure.md`, `prompts/brief-stage.schema.json`.
+- `check.sh stage <structure.json> <research.json> <keywords.json>` FAILs a section whose `source` names evidence that is not in the research or the keyword choice. `brief_stages.sh` runs it inline as the structure stage is written.
+- `source` now carries its evidence (`must_cover: cleaning the pump`) rather than a bare category. **The blocking cause was the schema, not the prompt:** `source` was an enum of the three category labels, so the router could not emit evidence at all and the prompt rewrite had no effect until the enum was removed. Shape is now held by the deterministic check instead, which is where this repo puts quality anyway.
+- `page purpose` is the one source carrying no evidence. It is accepted, because a review's verdict genuinely comes from the page purpose, but a WARN fires when more than half the sections use it.
+- Verified: an invented "Manufacturer Background" section FAILs by name, the old bare-category format FAILs, a genuinely traced stage passes, and the passes were confirmed real by reading `must_cover` and the competitor headings rather than trusting exit 0.
+
+### Phase 32: The menu can stop at the brief (done 2026-09-21)
+- Files: `scripts/seo.sh`, `README.md`.
+- `SEO_BRIEF_ONLY=1` truncates `STAGE_IDS` and `STAGE_LABELS` together at `brief`, so the menu offers five stages and `a` finishes once the brief is written. Every other part of the script indexes one array by the other's position, which is why they are sliced together rather than filtered at render time.
+- The outline, draft and rewrite stages keep working and are only hidden. Verified on a slug carrying a finished outline, draft and final: the menu showed five stages and `outputs/` was byte-for-byte unchanged.
+- This is the scope reset of 2026-09-21 made operational: the brief is the deliverable, and the drafting stages stay in the repo without being in the way.
 - Two phases were reverted and are recorded as failures rather than deleted: three prompt wordings aimed at the same outline faults each traded one structural failure for another when measured across briefs and seeds, which is why the repair is deterministic.
 
 ### Phase 15: Docs + SEO knowledge base

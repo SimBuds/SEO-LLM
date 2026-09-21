@@ -18,7 +18,7 @@ Output **only** a JSON object with exactly these keys:
     {
       "heading": "<a section this page needs, as a topic, not a full sentence>",
       "purpose": "<what the reader gets from it>",
-      "source": "<must_cover | competitor heading | page purpose>"
+      "source": "<see rule 1: 'must_cover: ...', 'competitor heading: ...', or 'page purpose'>"
     }
   ],
   "faq_questions": ["<questions to answer in the FAQ, most searched first>"],
@@ -26,11 +26,30 @@ Output **only** a JSON object with exactly these keys:
 }
 ```
 
+Worked examples of `source`, which is the field most often got wrong:
+
+```
+"source": "must_cover: cleaning the pump"
+"source": "competitor heading: How to clean your fountain"
+"source": "page purpose"
+```
+
+The text after the colon is copied from the research word for word. `must_cover`
+or `competitor heading` written on their own, with no colon and no text, is
+rejected.
+
 # Rules
 
-1. **Every section traces to the research.** Name where it came from in `source`:
-   a `must_cover` subtopic, a heading a competitor uses, or the stated page
-   purpose. A section you cannot trace does not belong in the list.
+1. **Every section traces to the research, and `source` carries the proof.**
+   Write the kind, a colon, then the exact wording from the research, copied
+   character for character:
+   - `must_cover: <the subtopic, exactly as the research spells it>`
+   - `competitor heading: <the heading, exactly as the competitor wrote it>`
+   - `page purpose` on its own, with no colon and no text, for a section that
+     comes from the stated purpose rather than from the research.
+   A reworded or paraphrased source is treated as untraceable and the section is
+   rejected, so copy rather than tidy. A section you cannot trace does not belong
+   in the list.
 2. **Order the sections the way a reader needs them**, not the way the research
    lists them. A definition comes before a comparison, a process before its edge
    cases.

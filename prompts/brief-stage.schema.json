@@ -65,11 +65,8 @@
             },
             "source": {
               "type": "string",
-              "enum": [
-                "must_cover",
-                "competitor heading",
-                "page purpose"
-              ]
+              "minLength": 1,
+              "description": "must_cover: <exact subtopic> | competitor heading: <exact heading> | page purpose. Shape enforced by check.sh stage, not by this schema, because an enum here forced the bare category that verified nothing."
             }
           },
           "required": [

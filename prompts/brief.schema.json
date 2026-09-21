@@ -102,6 +102,14 @@
         "url"
       ],
       "additionalProperties": false
+    },
+    "content_type": {
+      "type": "string",
+      "enum": [
+        "review",
+        "roundup",
+        "guide"
+      ]
     }
   },
   "required": [

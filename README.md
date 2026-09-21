@@ -117,7 +117,15 @@ with its state and runs the one you pick.
 # Runs in: local terminal
 bash scripts/seo.sh                 # lists the pages that have research, or starts one
 bash scripts/seo.sh example-domains # straight to that page
+
+# End the pipeline at the brief, for when you write the page yourself.
+SEO_BRIEF_ONLY=1 bash scripts/seo.sh example-domains
 ```
+
+`SEO_BRIEF_ONLY=1` hides the outline, draft and rewrite stages, so the menu is
+the five that produce a brief and `a` stops once the brief is written. The
+hidden stages still work and their files are left untouched, so unsetting the
+variable brings them back exactly as they were.
 
 ```
 SEO pipeline: example-domains
