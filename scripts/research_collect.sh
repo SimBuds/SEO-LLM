@@ -62,10 +62,18 @@ csv_to_tsv() { # csv_to_tsv <file> <delimiter>
 
 # Map an export's own column names onto the names research.json uses. Unmapped
 # columns become "" and are dropped, so an export may carry any extra columns.
+#
+# Two of an export's columns can canonicalise to the same name, and the later one
+# used to win. An Ahrefs SERP overview carries both "Keyword" and "Keywords",
+# where the second is a count of the keywords a URL ranks for, so every keyword
+# came through as a number ("91", "54", "488"). First occurrence wins now, and a
+# later duplicate is dropped like any unmapped column. Found 2026-09-21 on a real
+# export.
 canonical_header() { # canonical_header <tsv-header-line>
   awk -F'\t' '
     BEGIN { OFS = "\t" }
     {
+      delete seen
       for (i = 1; i <= NF; i++) {
         h = tolower($i); gsub(/^[[:space:]]+|[[:space:]]+$/, "", h)
         if (h == "keyword" || h == "keywords" || h == "query" || h == "top queries") $i = "keyword"
@@ -80,6 +88,7 @@ canonical_header() { # canonical_header <tsv-header-line>
         else if (h == "parent topic") $i = "parent_topic"
         else if (h == "intent" || h == "search intent") $i = "intent"
         else $i = ""
+        if ($i != "") { if ($i in seen) $i = ""; else seen[$i] = 1 }
       }
       print
     }

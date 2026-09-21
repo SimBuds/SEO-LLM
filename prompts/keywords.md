@@ -33,11 +33,31 @@ Output **only** a JSON object with exactly these keys:
 1. **Every keyword you return must appear in the research above**, in the keyword
    list or in a competitor's title or headings. Copy it character for character.
    Never invent a keyword, never merge two into a new phrase, and never reword one.
-2. **Pick the primary keyword on measured demand and fit.** Prefer a term the
-   research shows really produced impressions for this site, especially one
-   already ranking just off the first page, where a better page moves it. A term
-   with fewer impressions wins when it matches what this page is for, or when the
-   pages ranking for it are weaker. State that trade-off in `rationale`.
+2. **Pick the primary keyword on demand and fit.** The research carries one of
+   two kinds of demand data, and which one it is decides how you argue the
+   choice. Work out which case applies before you write `rationale`.
+
+   **Case A, the research has measured data**, meaning at least one keyword
+   carries impressions or clicks. Prefer a term that really produced
+   impressions for this site, especially one already ranking just off the first
+   page, where a better page moves it. A term with fewer impressions wins when
+   it matches what this page is for, or when the pages ranking for it are
+   weaker. State that trade-off in `rationale`. This data is measured, so never
+   call it estimated and never call it volume.
+
+   **Case B, no keyword carries impressions or clicks**, so the
+   research holds estimated third-party data instead. Prefer a term with more
+   estimated volume, and prefer an easier one when the difficulty separates two
+   terms that otherwise fit equally. Call this demand estimated rather than
+   measured, treat it as a ranking of terms against each other rather than as
+   real traffic, and let the competitor pages settle a close call.
+
+   **Case C, the research carries no demand data of either kind.** Choose on fit
+   with what the page is for and on what the competitor pages show, and say so.
+
+   In every case, describe the data in words only, as rule 3 requires ("the most
+   impressions", "the highest estimated volume", "easier to rank for"), and
+   never write the numbers themselves.
 3. **Do not repeat any number from the research.** The impressions, positions and
    any other figures are already recorded. Refer to them in words ("the query
    with the most impressions", "already close to the first page"), not as

@@ -44,7 +44,7 @@ User in Claude Code
 
 Phases 6 to 13 are built, so the research stage runs end to end: page check, competitor and export collection, keyword choice, a staged brief builder, and the research detail reaching the outline. Planned next are a metadata pass writing `meta.json` (Phase 14), and an SEO knowledge base grounding the prompts in `SEO-GUIDE.md` plus a `/seo-generate` skill (Phase 15).
 
-The research stage ahead of ingest was added 2026-09-20. Search Console data arrives as files the user exports, never through an API, so the pipeline needs no keys and breaks nobody's terms of service. Search engine results pages are never scraped. Third-party keyword estimates were dropped on 2026-09-20 in favour of measured first-party data, and the CSV parser still reads a volume column when an export carries one.
+The research stage ahead of ingest was added 2026-09-20. Search Console data arrives as files the user exports, never through an API, so the pipeline needs no keys and breaks nobody's terms of service. Search engine results pages are never scraped. Measured first-party data is preferred, and third-party keyword estimates are the accepted fallback when Search Console has no history for the page, which is the case for a new site or a topic the site has never ranked for. The CSV parser reads a volume column either way. Estimates were dropped outright on 2026-09-20 and reinstated as a fallback on 2026-09-21, because the first-party-only rule left a pre-launch site with nothing but competitor headings to choose from.
 
 No Python app. No workflow engine. No SQLite.
 
@@ -260,6 +260,21 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - `draft_sections.sh` and `rewrite_sections.sh` read `OUTPUTS_DIR`, matching `seo.sh`, so a whole run can be verified in a scratch tree.
 - `SEO-GUIDE.md` was trimmed from 10,094 to 6,964 words. Appendix B was removed and its statement that `check.sh` enforces three of the guide's targets moved into the opening note.
 - `clean_outline` in `lib_parts.sh` repairs an outline deterministically before it is checked, dropping `_Intent:` and `Keywords:` lines that are not directly under an H2 and any prose under a heading, and printing what it removed.
+
+### Phase 28: Estimated keyword data as a fallback (done 2026-09-21)
+- Files: `scripts/check.sh`, `prompts/keywords.md`, `.claude/skills/seo-research/SKILL.md`, `SEO-GUIDE.md`, `PLAN.md`.
+- Goal: measured first-party data stays the preference, and a third-party estimate is the accepted fallback when Search Console has no history for the page. This reverses the Phase 19 decision to drop estimates outright, which left a pre-launch site with nothing but competitor headings to choose from.
+- No collection code changed. `research_collect.sh` already mapped the Ahrefs columns, already detected the tab-separated file Ahrefs ships under a `.csv` name, and already sorted by volume before clicks. Phase 19 had removed the guidance, never the reader.
+- `check.sh research` now separates three cases: measured data present, estimated only, and no demand data at all. A volume column of zeroes counts as none, because that is an export artifact rather than a finding.
+- `prompts/keywords.md` rule 2 is split into labelled Case A, B and C. The labelling is load-bearing and is not a style choice: with the fallback written as a trailing condition instead, the model called measured Search Console data "estimated volume" in 4 of 6 runs against 0 of 6 before the change. The split restored 0 of 6 while keeping the fallback working in 6 of 6.
+- Measured across three prompt variants and three research fixtures at matched seeds, 30 live calls in total. That method is the Phase 24 and 25 lesson applied: a prompt change is judged on a rate across fixtures, never on one sample.
+
+### Phase 29: A real export cannot inject a false keyword or a false measured signal (done 2026-09-21)
+- Files: `scripts/research_collect.sh`, `scripts/check.sh`, `prompts/keywords.md`.
+- Found by running the first real Ahrefs exports through the pipeline, not by review. Both faults were silent and produced plausible output.
+- `canonical_header` now keeps the first column that claims a canonical name and drops later duplicates. An Ahrefs SERP overview carries both `Keyword` and `Keywords`, where the second counts the keywords a URL ranks for, so every keyword arrived as a number ("91", "54", "488"). The same file carries `Volume` and `Global volume`, and first-wins now takes the country figure rather than the global one.
+- The measured-data test in `check.sh` no longer counts `position` as evidence. Search Console reports a position, but so does an Ahrefs SERP overview, where it is somebody else's rank. Reading it as first-party data made the check go silent on a file with no first-party data in it. Impressions and clicks carry no such collision, so the test is now those two. `prompts/keywords.md` Case A and B match.
+- Verified against both real exports: the organic keywords file is unchanged at 73 keywords, the SERP overview went from 8 keywords (7 of them numeric) to 1, and from silent to correctly reporting estimated data. All five Phase 28 fixtures unchanged.
 - Two phases were reverted and are recorded as failures rather than deleted: three prompt wordings aimed at the same outline faults each traded one structural failure for another when measured across briefs and seeds, which is why the repair is deterministic.
 
 ### Phase 15: Docs + SEO knowledge base

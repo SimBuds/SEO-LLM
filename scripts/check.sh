@@ -217,12 +217,27 @@ research)
   (( FAILS == 0 )) || exit 1
 
   KW=$(jq '.keywords | length' "$RESEARCH")
-  (( KW > 0 )) || warn "no keywords: add the Search Console Performance export to inputs/, or expect the keyword stage to work from competitor pages alone"
-  # Search Console data is what this pipeline is built around: measured
-  # impressions, clicks and positions for the user's own site. Anything else an
-  # export happens to carry is kept, but its absence is not worth a warning.
-  WITH_QUERY_DATA=$(jq '[.keywords[] | select(.impressions != null or .clicks != null or .position != null)] | length' "$RESEARCH")
-  (( KW == 0 || WITH_QUERY_DATA > 0 )) || warn "no keyword carries impressions, clicks or a position: this looks like an export without Search Console data, so the choice rests on the competitor pages"
+  (( KW > 0 )) || warn "no keywords: add an export to inputs/ (Search Console Performance is the first choice, a third-party export works when the page has no Search Console history), or expect the keyword stage to work from competitor pages alone"
+  # Search Console data is what this pipeline prefers: measured impressions and
+  # clicks for the user's own site. A page with no Search Console history has
+  # none to prefer, so an estimated export is the accepted fallback and is
+  # reported as estimated rather than as missing. A volume column of zeroes is an
+  # export artifact, not a finding, so it does not count.
+  #
+  # Position is deliberately NOT evidence of measured data, though Search Console
+  # reports it. An Ahrefs SERP overview also has a "Position" column, meaning the
+  # rank of somebody else's result, and reading that as the user's own position
+  # made this check go silent on a file with no first-party data in it at all.
+  # Impressions and clicks have no such collision. Found 2026-09-21 on a real export.
+  WITH_QUERY_DATA=$(jq '[.keywords[] | select(.impressions != null or .clicks != null)] | length' "$RESEARCH")
+  WITH_ESTIMATE=$(jq '[.keywords[] | select(((.volume // 0) > 0) or (.difficulty != null))] | length' "$RESEARCH")
+  if (( KW > 0 && WITH_QUERY_DATA == 0 )); then
+    if (( WITH_ESTIMATE > 0 )); then
+      warn "no keyword carries impressions or clicks, so this is estimated third-party data rather than measured: compare the figures against each other, not as real traffic, and let the competitor pages settle a close call"
+    else
+      warn "no keyword carries impressions, clicks or a volume: the choice rests on the competitor pages"
+    fi
+  fi
   OK=$(jq '[.competitors[] | select(.fetched)] | length' "$RESEARCH")
   TOTAL=$(jq '.competitors | length' "$RESEARCH")
   (( TOTAL > 0 )) || warn "no competitor pages: add URLs to competitors.txt for intent and gap analysis"

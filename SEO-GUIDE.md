@@ -160,12 +160,20 @@ Google reporting what happened, not a vendor modelling what might have.
 Verify the property, submit the sitemap, and export the Performance report as
 CSV. That export is this pipeline's keyword input.
 
-**Why measured, not estimated.** Third-party suites sell search volume, keyword
+**Why measured first.** Third-party suites sell search volume, keyword
 difficulty and traffic potential. Those are models built from panels and
 extrapolation, they disagree with each other, and they are wrong in ways you
-cannot audit. The honest trade-off: Search Console only describes queries you
-already appear for, so a brand new site falls back to the pages that rank now
-and the questions customers actually ask.
+cannot audit. Measured data wins every time it exists.
+
+**What to do when it does not.** Search Console only describes queries you
+already appear for, so a brand new site, or an established one moving into a
+topic it has never ranked for, has nothing measured to read. Estimated data is
+the accepted fallback there, because ranking ten candidate terms against each
+other is still better than guessing. Two rules keep it honest. Read the figures
+as relative positions rather than as traffic you will receive, since the
+absolute numbers are the part that is most wrong. And let the pages that
+already rank settle a close call, because those are observed fact and the
+volume figure is not.
 
 ### Bing Webmaster Tools
 

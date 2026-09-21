@@ -35,13 +35,21 @@ This is the first stage of the pipeline, ahead of `/seo-keywords` and
      description is present and its length, the heading outline, and the word
      count. Name anything off the SEO-GUIDE.md targets, which are a title of 50
      to 60 characters, a meta description of 150 to 160, and exactly one H1.
-7. Ask for the research inputs, both optional:
+7. Ask for the research inputs, all optional:
    - **The Search Console Performance export** in `research/<slug>/inputs/`,
-     which is the source this pipeline is built around: measured impressions,
-     clicks and positions for the user's own site. Any other CSV or TSV parses
-     too, since columns are read by name. Tell the user to drop the files in and
-     say when they are there. If they have no Search Console history for this
-     page, say so plainly and carry on with the competitor pages alone.
+     which is this pipeline's first choice: measured impressions, clicks and
+     positions for the user's own site. Any other CSV or TSV parses too, since
+     columns are read by name. Tell the user to drop the files in and say when
+     they are there.
+   - **A third-party keyword export** in the same folder, when the page has no
+     Search Console history. A brand new site, or a page on a topic the site has
+     never appeared for, has no measured data to prefer, and estimated volume
+     beats nothing. Ahrefs, Semrush and Keyword Planner exports all parse as
+     they come: the volume and difficulty columns are read by name, and a
+     tab-separated file saved under a `.csv` name is detected. Say plainly that
+     the figures are modelled rather than measured, so they rank terms against
+     each other and are not real traffic. If the user has neither export, carry
+     on with the competitor pages alone.
    - **Competitors** in `research/<slug>/competitors.txt`, one URL per line,
      `#` comments allowed. SEO-GUIDE.md asks for the top 3 to 5 ranking pages
      for the target query. The user finds them in Google. Never fetch a search
