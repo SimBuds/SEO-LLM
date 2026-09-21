@@ -254,6 +254,14 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - The CSV parser deliberately keeps its Ahrefs column aliases, so an export a user already holds still works.
 - `scripts/fetch_sitemap.sh` builds a per-site page inventory from `sitemap.xml` (via `robots.txt`, following a sitemap index one level) through `fetch_page.sh --raw`, and `research.json` gains `site_pages`, which is the cannibalization check and the internal-link candidate list.
 
+### Phases 22 to 27: Hardening, the guide trim, and the outline repair (done 2026-09-21)
+- Files: `scripts/llm_call.sh`, `scripts/draft_sections.sh`, `scripts/rewrite_sections.sh`, `scripts/lib_parts.sh`, `scripts/seo.sh`, `SEO-GUIDE.md`, `.claude/skills/seo-outline/SKILL.md`, `README.md`.
+- `llm_call.sh` refuses a prompt file with no non-whitespace content (exit 2), because an empty prompt made the router answer the system message alone and return confident, unrelated text that could satisfy a schema.
+- `draft_sections.sh` and `rewrite_sections.sh` read `OUTPUTS_DIR`, matching `seo.sh`, so a whole run can be verified in a scratch tree.
+- `SEO-GUIDE.md` was trimmed from 10,094 to 6,964 words. Appendix B was removed and its statement that `check.sh` enforces three of the guide's targets moved into the opening note.
+- `clean_outline` in `lib_parts.sh` repairs an outline deterministically before it is checked, dropping `_Intent:` and `Keywords:` lines that are not directly under an H2 and any prose under a heading, and printing what it removed.
+- Two phases were reverted and are recorded as failures rather than deleted: three prompt wordings aimed at the same outline faults each traded one structural failure for another when measured across briefs and seeds, which is why the repair is deterministic.
+
 ### Phase 15: Docs + SEO knowledge base
 - Files: `README.md`, `docs/google/{helpful-content,eeat,semantic-search,ai-content-guidelines}.md`, link from system prompt.
 - Goal: prompts ground in EEAT / helpful-content guidance, and the quickstart is documented.

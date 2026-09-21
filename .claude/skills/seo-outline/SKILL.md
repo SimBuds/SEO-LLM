@@ -21,13 +21,21 @@ Generate a structured article outline from a JSON brief via the llama.cpp router
 1. The slug is the brief's basename without `.json` (`briefs/test-brief.json` → `test-brief`). Outputs go to `outputs/<slug>/` (create it if needed).
 2. Fill the prompt: `bash scripts/fill_prompt.sh prompts/outline.md --brief <brief.json> > outputs/<slug>/_outline_prompt.txt`
 3. Run: `bash scripts/llm_call.sh outputs/<slug>/_outline_prompt.txt 0.3 1 > outputs/<slug>/outline.md`
-4. Check: `bash scripts/check.sh outline outputs/<slug>/outline.md <brief.json>`
-5. Report: output path, topic H2 count, FAQ question count, and every FAIL/WARN line. If the check passed, suggest `/seo-draft <brief.json>`.
+4. Repair what is deterministically repairable, before checking:
+   ```bash
+   source scripts/lib_parts.sh && clean_outline outputs/<slug>/outline.md
+   ```
+   It drops `_Intent:` and `Keywords:` lines that are not directly under an H2,
+   and any prose under a heading, printing every line it removed. Those are the
+   two faults the model repeats, and three prompt wordings failed to stop them
+   (see PLAN.md, Phases 24 and 25). Report what it removed rather than hiding it.
+5. Check: `bash scripts/check.sh outline outputs/<slug>/outline.md <brief.json>`
+6. Report: output path, topic H2 count, FAQ question count, anything the repair removed, and every FAIL/WARN line. If the check passed, suggest `/seo-draft <brief.json>`.
 
 ## Failure handling
 
 - If `llm_call.sh` exits non-zero, surface the error and stop. Do not retry silently.
-- If `check.sh outline` fails, report the FAIL lines and ask whether to regenerate. A rerun with the same seed usually repeats the output, so offer seed 2 (then 3) for the retry: `bash scripts/llm_call.sh outputs/<slug>/_outline_prompt.txt 0.3 2`.
+- If `check.sh outline` fails after the repair, the fault is structural (a missing FAQ or Conclusion, more than one H1, a section with no intent line) rather than stray lines. Report the FAIL lines and ask whether to regenerate. A rerun with the same seed usually repeats the output, so offer seed 2 (then 3) for the retry: `bash scripts/llm_call.sh outputs/<slug>/_outline_prompt.txt 0.3 2`.
 - WARN lines do not block `/seo-draft`, but mention them.
 
 ## Out of scope

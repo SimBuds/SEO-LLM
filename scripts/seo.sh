@@ -31,6 +31,10 @@ else
   BOLD=""; DIM=""; RESET=""; GREEN=""; YELLOW=""; RED=""
 fi
 
+# clean_outline lives with the other per-part helpers.
+# shellcheck source=lib_parts.sh
+source "$ROOT/scripts/lib_parts.sh"
+
 say()  { printf '%s\n' "$*"; }
 warn() { printf '%s%s%s\n' "$YELLOW" "$*" "$RESET"; }
 err()  { printf '%s%s%s\n' "$RED" "$*" "$RESET"; }
@@ -378,6 +382,7 @@ action_outline() {
       err "the call failed, see the message above."
       return 1
     }
+    clean_outline "$out/outline.md"
     cat "$out/outline.md"
     if run_check outline "$out/outline.md" "$BRIEFS/$SLUG.json"; then
       return 0

@@ -60,7 +60,7 @@ SEO-LLM/
 │   ├── fill_prompt.sh  # fills a template's {{PLACEHOLDERS}} from a brief, outline, or source text
 │   ├── draft_sections.sh # section-by-section drafting loop: split, budget, call, verify, check, retry, stitch
 │   ├── rewrite_sections.sh # per-part readability edit with guards and re-verification, stitched into final.md
-│   ├── lib_parts.sh      # shared helpers: fact verification, heading restore, unbold, draft_factor
+│   ├── lib_parts.sh      # shared helpers: fact verification, heading restore, unbold, outline repair, draft_factor
 │   └── check.sh        # deterministic checks on a brief, outline, or draft (FAIL/WARN lines)
 ├── research/           # per-page research: <slug>/page.json, inputs/, _cache/ (cache gitignored)
 ├── briefs/             # user inputs (JSON)
@@ -346,6 +346,15 @@ them and rejects an unknown key, which catches a typo such as `mustcover`.
 All seven required keys are still required. `facts` lists the business specifics (names, prices, policies, timelines) the outline and draft may state, and the prompts forbid inventing any others. It may be empty for a generic topic and holds at most 40 entries. `tone` is one of `Professional`, `Authoritative`, `Conversational`, `Friendly`, or `Technical`, `word_count` is a whole number, and `keywords` holds 3 to 6 entries. [prompts/brief.schema.json](prompts/brief.schema.json) states the same rules for the router, and `/seo-ingest` checks a generated brief against them with `jq`.
 
 `scripts/fill_prompt.sh` substitutes these into the templates' placeholders (`{{TOPIC}}`, `{{BRIEF}}`, `{{TONE}}`, `{{AUDIENCE}}`, `{{KEYWORDS}}`, `{{WORD_COUNT}}`, `{{CTA}}`, `{{FACTS}}`, plus `{{SEARCH_INTENT}}`, `{{MUST_COVER}}`, `{{QUESTIONS}}`, `{{EXISTING_PAGE}}`, `{{OUTLINE}}` and `{{SOURCE_TEXT}}`) and exits 1 if a template placeholder is left unfilled. The four research placeholders fill with a stated value such as `(none researched)` when the brief does not carry them, so one prompt serves both brief shapes.
+
+The outline is repaired before it is checked. `clean_outline` in
+[scripts/lib_parts.sh](scripts/lib_parts.sh) keeps headings, blank lines, and
+one `_Intent:` and one `Keywords:` line directly under each H2, and drops
+everything else, printing every line it removed. The model repeatedly puts those
+guidance lines under the H1 or under H3s, or writes a paragraph under a heading,
+and three prompt wordings were measured against it without success, so the fix
+is deterministic rather than verbal. A valid outline comes back byte-identical,
+and an outline missing something real still fails its check.
 
 `word_count` also sizes the outline: up to 1000 words gets 2 to 3 topic sections, up to 1800 gets 3 to 5, and longer gets 4 to 6 (the table in [prompts/outline.md](prompts/outline.md), mirrored in `scripts/check.sh`).
 

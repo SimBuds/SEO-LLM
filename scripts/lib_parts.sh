@@ -37,6 +37,34 @@ unbold() {
   sed -i -E '/^#/!s/\*\*([^*]+)\*\*/\1/g' "$1"
 }
 
+# clean_outline <outline>: an outline is headings plus, directly under each H2,
+# one _Intent: line and one Keywords: line. The model puts those lines under the
+# H1 or under H3s, and sometimes writes a paragraph under a heading, and
+# check.sh outline rightly FAILs on both. Three prompt wordings were measured
+# against this in Phases 24 and 25 and each traded one failure for another, so
+# the repair is deterministic: keep headings, blank lines and the two guidance
+# slots under an H2, drop the rest, and say what was dropped. Returns 0 always;
+# whether the result is a valid outline stays check.sh's decision.
+clean_outline() {
+  local f=$1 removed
+  removed=$(awk '
+    /^#{1,6} / { slot = ($0 ~ /^## /) ? 2 : 0; next }
+    /^[[:space:]]*$/ { next }
+    /^(_Intent:|Keywords:)/ { if (slot > 0) { slot--; next } }
+    { printf "  %d: %s\n", FNR, substr($0, 1, 90) }
+  ' "$f")
+  [[ -z "$removed" ]] && return 0
+  awk '
+    /^#{1,6} / { slot = ($0 ~ /^## /) ? 2 : 0; print; next }
+    /^[[:space:]]*$/ { print; next }
+    /^(_Intent:|Keywords:)/ { if (slot > 0) { slot--; print } ; next }
+    { next }
+  ' "$f" > "$f.tmp"
+  mv "$f.tmp" "$f"
+  echo "outline repair removed $(grep -c . <<< "$removed") line(s) that do not belong in an outline:" >&2
+  printf '%s\n' "$removed" >&2
+}
+
 # verify_part <name> <part> <dir> <heading-source or ""> <check command...>
 # A second call lists sentences the facts do not support (prompts/verify.md,
 # schema-constrained) with a replacement for each. Replacements are applied as
