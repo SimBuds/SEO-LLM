@@ -318,7 +318,7 @@ stage)
     warn "$PURPOSED of $SECTIONS sections trace only to the page purpose, not to the research, so most of this structure is ungrounded"
   fi
 
-  (( $(jq '.faq_questions | length' "$STAGE") > 0 )) || warn "no faq_questions: the research had none to draw on"
+  (( $(jq '.faq_questions | length' "$STAGE") > 0 )) || warn "no faq_questions: the FAQ section will have nothing to answer, so check whether the research really holds none"
   ;;
 
 keywords)

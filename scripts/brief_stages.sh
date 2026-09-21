@@ -59,7 +59,15 @@ STAGE_DIR="$DIR/brief-stages"
 RESEARCH="$DIR/research.json"
 KEYWORDS="$DIR/keywords.json"
 PURPOSE_FILE="$STAGE_DIR/purpose.txt"
-TYPE_FILE="$STAGE_DIR/type.txt"
+# The type lives beside research.json rather than inside brief-stages/, because
+# the keyword stage reads it and runs before brief-stages/ exists. An empty file
+# means the type was asked for and declined, which is why the content is read
+# rather than the file merely tested for existence.
+TYPE_FILE="$DIR/type.txt"
+RECORDED_TYPE=""
+if [[ -r "$TYPE_FILE" ]]; then
+  RECORDED_TYPE=$(tr -d '[:space:]' < "$TYPE_FILE")
+fi
 
 [[ -r "$RESEARCH" ]] || { echo "no $RESEARCH: run /seo-research $SLUG first" >&2; exit 2; }
 [[ -r "$KEYWORDS" ]] || { echo "no $KEYWORDS: run /seo-keywords $SLUG first" >&2; exit 2; }
@@ -70,12 +78,13 @@ mkdir -p "$STAGE_DIR"
 # and half as another. Leaving it unset keeps the generic behaviour, which is
 # what seo.sh and every slug written before this flag existed do.
 if [[ -n "$TYPE" ]]; then
-  if [[ -r "$TYPE_FILE" ]] && [[ "$(cat "$TYPE_FILE")" != "$TYPE" ]]; then
-    echo "$SLUG is already recorded as $(cat "$TYPE_FILE"), not $TYPE." >&2
+  if [[ -n "$RECORDED_TYPE" && "$RECORDED_TYPE" != "$TYPE" ]]; then
+    echo "$SLUG is already recorded as $RECORDED_TYPE, not $TYPE." >&2
     echo "A brief keeps one type. Start a new slug, or delete $TYPE_FILE and redo every stage." >&2
     exit 1
   fi
   printf '%s\n' "$TYPE" > "$TYPE_FILE"
+  RECORDED_TYPE="$TYPE"
 fi
 
 # The purpose is asked once and reused, because every stage needs it and a
@@ -146,9 +155,9 @@ run_stage() { # run_stage <index> <stage>
   # are, which is the whole difference between a review and an article. The block
   # is appended to the filled prompt rather than filled into the template, so a
   # run with no type produces a byte-identical prompt to before this flag existed.
-  if [[ "$stage" == structure && -r "$TYPE_FILE" ]]; then
+  if [[ "$stage" == structure && -n "$RECORDED_TYPE" ]]; then
     local recorded type_file
-    recorded=$(cat "$TYPE_FILE")
+    recorded="$RECORDED_TYPE"
     type_file="prompts/brief-type-$recorded.md"
     [[ -r "$type_file" ]] || type_file="$HERE/../prompts/brief-type-$recorded.md"
     printf '\n' >> "$prompt"
@@ -216,7 +225,7 @@ merge_brief() {
     --slurpfile keywords "$KEYWORDS" \
     --slurpfile research "$RESEARCH" \
     --argjson words "$words" \
-    --arg ctype "$( [[ -r "$TYPE_FILE" ]] && cat "$TYPE_FILE" || echo "" )" '
+    --arg ctype "$RECORDED_TYPE" '
     {
       topic: $intent[0].topic,
       target_audience: $intent[0].target_audience,

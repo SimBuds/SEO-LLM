@@ -283,6 +283,30 @@ need_router() {
 }
 
 purpose_file() { printf '%s/%s/brief-stages/purpose.txt' "$RESEARCH" "$SLUG"; }
+type_file() { printf '%s/%s/type.txt' "$RESEARCH" "$SLUG"; }
+
+# The content type is asked before the keyword stage, not at the brief, because
+# it decides the page's format and so which term the page can honestly target.
+# An empty answer is a real answer: it is recorded, so the question is asked
+# once, and it keeps the generic behaviour every slug had before this existed.
+need_type() { # sets TYPE, asking once and reusing it afterwards
+  local f; f=$(type_file)
+  if [[ -r "$f" ]]; then
+    TYPE=$(tr -d '[:space:]' < "$f")
+    return 0
+  fi
+  say "What kind of page is this? Enter 'review' for one product you have used,"
+  say "or press enter for a general article."
+  read -r -p "Type: " TYPE
+  TYPE="${TYPE//[[:space:]]/}"
+  if [[ -n "$TYPE" && ! -r "$ROOT/prompts/brief-type-$TYPE.md" ]]; then
+    err "unknown content type: $TYPE (accepted: review, or empty for a general article)"
+    return 1
+  fi
+  mkdir -p "$(dirname "$f")"
+  printf '%s\n' "$TYPE" > "$f"
+  return 0
+}
 
 need_purpose() { # sets PURPOSE, asking once and reusing it afterwards
   local f; f=$(purpose_file)
@@ -311,6 +335,7 @@ confirm_replace() { # confirm_replace <path> <description>
 action_keywords() {
   need_router || return 1
   need_purpose || return 1
+  need_type || return 1
   local dir="$RESEARCH/$SLUG"
   confirm_replace "$dir/keywords.json" "A keyword choice" || { say "kept"; return 0; }
 
@@ -319,8 +344,19 @@ action_keywords() {
     say "calling the model (temperature 0.2, seed $seed)..."
     bash "$ROOT/scripts/fill_prompt.sh" "$ROOT/prompts/keywords.md" \
       --set-file RESEARCH="$dir/research.json" \
-      --set PAGE_PURPOSE="$PURPOSE" > "$dir/_keywords_prompt.txt" \
-    && bash "$ROOT/scripts/llm_call.sh" "$dir/_keywords_prompt.txt" 0.2 "$seed" \
+      --set PAGE_PURPOSE="$PURPOSE" > "$dir/_keywords_prompt.txt" || {
+      err "the prompt could not be filled, see the message above."
+      return 1
+    }
+    # The type block is appended to the filled prompt rather than templated into
+    # it, so a slug with no type produces the prompt this stage always produced.
+    # A type with no keyword-stage guidance file runs untyped rather than
+    # failing: the type still shapes the brief stages that do have one.
+    if [[ -n "$TYPE" && -r "$ROOT/prompts/keywords-type-$TYPE.md" ]]; then
+      printf '\n' >> "$dir/_keywords_prompt.txt"
+      cat "$ROOT/prompts/keywords-type-$TYPE.md" >> "$dir/_keywords_prompt.txt"
+    fi
+    bash "$ROOT/scripts/llm_call.sh" "$dir/_keywords_prompt.txt" 0.2 "$seed" \
          "$ROOT/prompts/keywords.schema.json" > "$dir/keywords.json" || {
       err "the call failed, see the message above. The prompt is kept at $dir/_keywords_prompt.txt"
       return 1
@@ -345,6 +381,7 @@ action_keywords() {
 action_brief_stage() {
   need_router || return 1
   need_purpose || return 1
+  need_type || return 1
   local n; n=$(stage_count_brief_stages)
   local names=(intent structure targets facts)
   if (( n >= 4 )); then
@@ -353,7 +390,9 @@ action_brief_stage() {
     return 0
   fi
   say "running brief stage $((n + 1)) of 4 (${names[$n]})..."
-  bash "$ROOT/scripts/brief_stages.sh" "$SLUG" --purpose "$PURPOSE" || {
+  local -a targs=()
+  [[ -n "$TYPE" ]] && targs=(--type "$TYPE")
+  bash "$ROOT/scripts/brief_stages.sh" "$SLUG" --purpose "$PURPOSE" "${targs[@]}" || {
     err "the stage failed, see the message above."
     return 1
   }

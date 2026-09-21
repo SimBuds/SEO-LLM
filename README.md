@@ -156,6 +156,10 @@ router: serving qwen
 - **The purpose is asked once per page** and saved to
   `research/<slug>/brief-stages/purpose.txt`, so the keyword choice and all four
   brief stages work from the same sentence.
+- **The content type is asked once per page**, before the keyword choice, and
+  saved to `research/<slug>/type.txt`. Answering `review` shapes the keyword
+  choice and the brief's sections. Pressing enter records an empty answer, which
+  keeps the generic behaviour and stops the question being asked again.
 - **A failed check offers a reseed rather than retrying silently.** The keyword
   stage offers seed 2, the outline stage offers seeds 2 and 3, and each one says
   what to do when the retries are exhausted.
@@ -276,7 +280,9 @@ stage** and stops after each so you can correct it before the next runs:
 | 4 facts | the business specifics the article may state, and what was left out | stages 1 to 3 plus `briefs/_ingest/<slug>.txt` |
 
 The purpose is recorded once in `brief-stages/purpose.txt` and reused, so a later
-stage cannot drift onto a different page. Every stage sees the approved ones, so
+stage cannot drift onto a different page. The content type in `type.txt` works
+the same way and is refused if it changes, because a brief half-shaped as a
+review and half as an article is worse than either. Every stage sees the approved ones, so
 an edit you make to stage 1 changes what stage 2 produces. `--redo <stage>` drops
 that stage and every stage after it, because the later ones were built on the
 version being replaced.
@@ -419,6 +425,7 @@ orphan its outline.
 | `research/<slug>/research.json` | `/seo-research` | The collected research: merged keywords, competitor pages, the existing page, your matching pages |
 | `research/<slug>/_keywords_prompt.txt` | `/seo-keywords` | The filled keyword prompt |
 | `research/<slug>/keywords.json` | `/seo-keywords` | The target keyword, intent, business potential, questions and subtopics |
+| `research/<slug>/type.txt` | `/seo-keywords` | The content type, recorded once, empty when declined |
 | `research/<slug>/brief-stages/purpose.txt` | `/seo-brief` | The one-line page purpose, recorded once and reused by every stage |
 | `research/<slug>/brief-stages/NN-<stage>.json` | `/seo-brief` | One approved brief stage, with its `.prompt.txt`, `.schema.json` and `.prior.json` beside it |
 | `research/_cache/*.body` | `/seo-research` | Cached raw HTML and response status, gitignored |

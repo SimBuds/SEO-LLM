@@ -68,8 +68,18 @@ Output **only** a JSON object with exactly these keys:
 5. **Score business potential** on this scale: 3 the product is essential to the
    answer, 2 the product helps but alternatives exist, 1 the product can only be
    mentioned in passing, 0 the product cannot be mentioned naturally.
-6. **`questions` come from the competitor headings**, especially ones phrased as
-   questions. Return an empty list rather than inventing any.
+6. **`questions` come from the research, and it holds them in two places.**
+   Competitor headings phrased as questions are one source. The keyword list is
+   the other: a term that asks something ("how to set up ...", "is ... battery
+   operated"), or that names a problem or a task the reader needs solved
+   ("... not working", "... leaking", "cleaning ..."), is a question the page has
+   to answer. Read both sources before you answer.
+   A keyword that only names the product, a variant, a colour, a size, a part or
+   a shopping term is **not** a question, however commercial it is. Terms like
+   "... reviews", "... replacement pump" and "... mini" belong in the keyword
+   fields and never here.
+   Copy each question character for character as rule 1 requires, and return an
+   empty list when the research holds neither kind.
 7. **`must_cover` are subtopics several competitors share.** These become the
    page's sections, so name them as topics, not as sentences.
 8. Copy every key name character for character, and output no prose outside the
