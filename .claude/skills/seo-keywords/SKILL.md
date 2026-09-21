@@ -11,6 +11,10 @@ one decision every later stage is built on.
 ## Inputs
 
 - `$1` the slug. If missing, ask which page.
+- `research/<slug>/suggested.txt`, optional: keywords the user suggested, one per
+  line, written by the menu's intake. Pass it to the check when it exists and is
+  not empty, and append `prompts/keywords-suggested.md` plus its contents to the
+  filled prompt so the model may return one of those terms.
 - The page's purpose in one line. Take it from the user's earlier description if
   they gave one, otherwise ask: **"In one line, what is this page for and who is
   it for?"** Do not invent it from the slug.
@@ -37,7 +41,8 @@ one decision every later stage is built on.
         prompts/keywords.schema.json > research/<slug>/keywords.json
    ```
    The schema argument constrains the reply, so nothing needs stripping.
-3. Check: `bash scripts/check.sh keywords research/<slug>/keywords.json research/<slug>/research.json`.
+3. Check: `bash scripts/check.sh keywords research/<slug>/keywords.json research/<slug>/research.json [research/<slug>/suggested.txt]`.
+   The third argument is optional and counts the user's suggestions as grounding.
 4. On a FAIL, retry once with seed 2. A second failure means the research does
    not support a confident choice: show the FAIL lines and the research WARNs,
    and ask the user to pick the primary keyword rather than retrying again.
@@ -52,13 +57,13 @@ one decision every later stage is built on.
      sections
    - every WARN line
 6. Close with: *"Review `research/<slug>/keywords.json`, then run `/seo-brief
-   <slug>`."* If the user asks to run it, say that stage is not built yet.
+   <slug>`."*
 
 ## Failure handling
 
-- `check.sh keywords` FAILs when a keyword is absent from the research file. That
-  means the model reworded or invented it, and the fix is a retry, never editing
-  the research to match.
+- `check.sh keywords` FAILs when a keyword is absent from the research file, and
+  from `suggested.txt` when that was passed. That means the model reworded or
+  invented it, and the fix is a retry, never editing the research to match.
 - A WARN about repeated figures means the reasoning restated volumes or
   difficulties. They belong in `research.json` alone. Mention it, and do not edit
   the numbers out by hand.

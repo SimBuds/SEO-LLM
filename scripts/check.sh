@@ -9,7 +9,9 @@
 #                    (defaults to 100; "draft" uses draft_factor, the aim of draft.md)
 #   check.sh rewrite <new-part.md> <old-part.md> <brief.json>
 #   check.sh research <research.json>
-#   check.sh keywords <keywords.json> <research.json>
+#   check.sh keywords <keywords.json> <research.json> [suggested.txt]
+#                    (suggested.txt: keywords typed at the menu, one per line,
+#                     grounding a term the research does not carry)
 #   check.sh stage    <structure-stage.json> <research.json> <keywords.json>
 # Prints "FAIL: ..." for problems that must be fixed or regenerated and
 # "WARN: ..." for problems a human should look at. Exits 1 on any FAIL, else 0.
@@ -326,6 +328,8 @@ keywords)
   # grounded in the research file, because an invented keyword sends the whole
   # article at a query nobody searched.
   KEYWORDS="${1:?keywords.json required}"; RESEARCH="${2:?research.json required}"
+  SUGGESTED="${3:-}"
+  [[ -z "$SUGGESTED" || -r "$SUGGESTED" ]] || { echo "not readable: $SUGGESTED" >&2; exit 2; }
   jq -e '
     (.primary_keyword | type == "string" and length > 0)
     and (.secondary_keywords | type == "array" and length >= 2 and length <= 6
@@ -344,9 +348,16 @@ keywords)
       (.competitors[]? | .title, (.headings[]? | .text)),
       .existing_page.title, (.existing_page.headings[]? | .text) ]
     | map(select(. != null)) | join(" | ") | ascii_downcase' "$RESEARCH")
+  # Keywords typed at the menu are a second source, so a term the person asked
+  # for is grounded rather than reported as invented. A term in neither still is.
+  GROUND="the research"
+  if [[ -n "$SUGGESTED" ]]; then
+    HAYSTACK="$HAYSTACK | $(tr '[:upper:]' '[:lower:]' < "$SUGGESTED" | paste -sd'|')"
+    GROUND="the research or the suggested keywords"
+  fi
   while read -r kw; do
     [[ -n "$kw" ]] || continue
-    grep -qiF "$kw" <<< "$HAYSTACK" || fail "keyword not found in the research: $kw"
+    grep -qiF "$kw" <<< "$HAYSTACK" || fail "keyword not found in $GROUND: $kw"
   done < <(jq -r '.primary_keyword, .secondary_keywords[]' "$KEYWORDS")
 
   PRIMARY=$(jq -r '.primary_keyword' "$KEYWORDS")

@@ -24,6 +24,10 @@ Router models carry no built-in system prompt. The wrapper sends `prompts/system
 4. **Section-based generation.** Long articles are never produced in a single call.
 5. **Multi-pass quality.** Draft → rewrite → SEO/metadata.
 6. **SEO-centric.** Prompts ground in intent, semantic coverage, EEAT.
+7. **The output is a file, never a publication.** The pipeline writes briefs and
+   articles into this repo and stops there. Nothing is pushed into WordPress or
+   any other CMS, and no stage publishes, submits or posts anything. The last
+   step is always a person copying the result where they want it.
 
 ---
 
@@ -32,6 +36,9 @@ Router models carry no built-in system prompt. The wrapper sends `prompts/system
 Built (one skill per stage, run in order):
 
 ```
+./seo [slug]               scripts/seo.sh: intake for a new page, then the menu
+                           that runs every stage below from one place
+
 User in Claude Code
   ├─ /seo-research <slug>  scripts/fetch_page.sh (no model call)              → research/<slug>/page.json
   ├─ /seo-ingest  <file>   pdftotext/pandoc + prompts/ingest.md (schema)      → briefs/<slug>.json
@@ -42,7 +49,7 @@ User in Claude Code
                            (REWRITE_MODEL) + verify.md                        → rewrite/*, final.md
 ```
 
-Phases 6 to 13 are built, so the research stage runs end to end: page check, competitor and export collection, keyword choice, a staged brief builder, and the research detail reaching the outline. Planned next are a metadata pass writing `meta.json` (Phase 14), and an SEO knowledge base grounding the prompts in `SEO-GUIDE.md` plus a `/seo-generate` skill (Phase 15).
+Phases 6 to 13, 16 to 32 and 33 to 38 are built, so the research stage runs end to end (page check, competitor and export collection, keyword choice, a staged brief builder, the research detail reaching the outline), and `./seo` is the front door that walks a new page through its inputs and then runs any stage. Planned next are a metadata pass writing `meta.json` (Phase 14), and an SEO knowledge base grounding the prompts in `SEO-GUIDE.md` plus a `/seo-generate` skill (Phase 15).
 
 The research stage ahead of ingest was added 2026-09-20. Search Console data arrives as files the user exports, never through an API, so the pipeline needs no keys and breaks nobody's terms of service. Search engine results pages are never scraped. Measured first-party data is preferred, and third-party keyword estimates are the accepted fallback when Search Console has no history for the page, which is the case for a new site or a topic the site has never ranked for. The CSV parser reads a volume column either way. Estimates were dropped outright on 2026-09-20 and reinstated as a fallback on 2026-09-21, because the first-party-only rule left a pre-launch site with nothing but competitor headings to choose from.
 
@@ -55,12 +62,17 @@ No Python app. No workflow engine. No SQLite.
 ```
 SEO-LLM/
 ├── .claude/
-│   ├── skills/              # <name>/SKILL.md per command. Built: /seo-research, /seo-ingest, /seo-outline, /seo-draft, /seo-rewrite. Planned: /seo-keywords, /seo-brief, /seo-metadata, /seo-generate
-│   └── settings.json        # allow the five entry scripts, jq, extractors, and Bash(curl -s localhost:8080/models)
+│   ├── skills/              # <name>/SKILL.md per command. Built: /seo-research, /seo-keywords, /seo-brief, /seo-ingest, /seo-outline, /seo-draft, /seo-rewrite. Planned: /seo-metadata, /seo-generate
+│   └── settings.json        # allow the entry scripts, jq, extractors, and Bash(curl -s localhost:8080/models)
+├── seo                      # launcher at the repo root: ./seo [slug] → scripts/seo.sh
 ├── prompts/
 │   ├── system.md            # system message sent on every model call
 │   ├── brief.schema.json    # ingest output schema
 │   ├── ingest.md
+│   ├── keywords.md          # the keyword choice, with keywords.schema.json
+│   ├── keywords-suggested.md # appended when you suggested keywords at the menu
+│   ├── keywords-type-<type>.md, brief-type-<type>.md  # appended for a typed page
+│   ├── brief-intent.md, brief-structure.md, brief-targets.md, brief-facts.md
 │   ├── outline.md
 │   ├── intro.md
 │   ├── section.md           # each topic H2 and the FAQ
@@ -69,9 +81,12 @@ SEO-LLM/
 │   ├── rewrite.md
 │   ├── system/              # planned (Phase 7): SEO standards, anti-generic rules, tone, EEAT
 │   ├── metadata.md          # planned (Phase 6)
-│   └── keywords.md          # planned (Phase 6)
 ├── scripts/
+│   ├── seo.sh               # the intake and the interactive menu, state read from the artifacts
 │   ├── fetch_page.sh        # polite curl fetch of one page: robots, per-host delay, cache, extract
+│   ├── fetch_sitemap.sh     # sitemap.xml and sitemap indexes → research/_sitemaps/<host>.txt
+│   ├── research_collect.sh  # exports + competitor pages → research/<slug>/research.json
+│   ├── brief_stages.sh      # one call per brief stage, then --merge into briefs/<slug>.json
 │   ├── llm_call.sh          # curl wrapper: prompt-file (+ optional temp/seed/schema) + prompts/system.md → stdout
 │   ├── fill_prompt.sh       # {{PLACEHOLDER}} filling from brief / outline / source text
 │   ├── draft_sections.sh    # per-part drafting loop with fact check, retry, stitch
@@ -296,6 +311,26 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - The outline, draft and rewrite stages keep working and are only hidden. Verified on a slug carrying a finished outline, draft and final: the menu showed five stages and `outputs/` was byte-for-byte unchanged.
 - This is the scope reset of 2026-09-21 made operational: the brief is the deliverable, and the drafting stages stay in the repo without being in the way.
 - Two phases were reverted and are recorded as failures rather than deleted: three prompt wordings aimed at the same outline faults each traded one structural failure for another when measured across briefs and seeds, which is why the repair is deterministic.
+
+### Phases 33 to 35: Keyword-stage grounding and the content type (done 2026-09-21)
+- Files: `prompts/keywords.md`, `prompts/brief-targets.md`, `scripts/check.sh`, `scripts/seo.sh`, `scripts/brief_stages.sh`.
+- `questions` may be mined from question-shaped and problem-shaped keywords, not only from competitor headings, because the model already did so in 3 runs of 5 and an empty list reached a real brief.
+- The call to action may not point at a section the structure does not contain. Two rewordings were measured and rejected before one held at every seed.
+- The content type is asked once per page before the keyword choice and recorded in `research/<slug>/type.txt`, so the page's format is settled before the term it targets is.
+
+### Phase 36: One command at the repo root (done 2026-09-21)
+- Files: `seo`, `README.md`.
+- `./seo [slug]` resolves the repository from its own path and hands over to `scripts/seo.sh`, so the front door is one short command from any directory. A shell alias was rejected because it lives outside the repository, and a Makefile would add a second runner the stack rules forbid.
+
+### Phase 37: The keyword stage takes the keywords you suggest (done 2026-09-21)
+- Files: `scripts/seo.sh`, `scripts/check.sh`, `prompts/keywords-suggested.md`, `README.md`.
+- Keywords you type at the menu are saved to `research/<slug>/suggested.txt` and appended to the filled prompt as a second source, so the model may return one the research does not carry. `check.sh keywords` takes the file as an optional third argument and counts it as grounding, so a term you asked for is not reported as invented while a term in neither still fails.
+- `prompts/keywords.md` is untouched, and the guidance is appended to the filled prompt exactly as the content type is, so a page with no suggestions produces a byte-identical prompt. Verified by `cmp` against the pre-change script.
+
+### Phase 38: The launch fills in a new page's inputs (done 2026-09-21)
+- Files: `scripts/seo.sh`, `README.md`.
+- `./seo` asks whether the page is already live, then which page it is, then for whatever is missing: the live URL or your site's URL, the keyword export paths (copied into `inputs/`), and the competitor URLs. A page that already has them is asked nothing, and every question takes a blank answer.
+- An export path that is not readable is refused by name and asked again, rather than skipped quietly, per the honest-checks rule in AGENTS.md.
 
 ### Phase 15: Docs + SEO knowledge base
 - Files: `README.md`, `docs/google/{helpful-content,eeat,semantic-search,ai-content-guidelines}.md`, link from system prompt.

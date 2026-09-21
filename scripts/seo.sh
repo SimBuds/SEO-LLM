@@ -308,6 +308,39 @@ need_type() { # sets TYPE, asking once and reusing it afterwards
   return 0
 }
 
+# read_lines <array-name> [prompt]: fill the named array with the lines typed,
+# one per prompt, ending at the first blank line. The intake and the suggested
+# keywords both ask for a list this way.
+read_lines() {
+  local -n _rl_out="$1"
+  local prompt="${2:-> }" line
+  _rl_out=()
+  while IFS= read -r -p "$prompt" line; do
+    [[ -z "${line//[[:space:]]/}" ]] && break
+    _rl_out+=("$line")
+  done
+}
+
+suggested_file() { printf '%s/%s/suggested.txt' "$RESEARCH" "$SLUG"; }
+
+# Keywords you want the model to consider beyond what the research turned up.
+# Asked once, after the competitor research and before the keyword choice, and
+# recorded like the type: an empty answer is a real answer, so a page with no
+# suggestions is never asked twice and its prompt is the one it always was.
+need_suggested() { # writes suggested.txt, asking once and reusing it afterwards
+  local f; f=$(suggested_file)
+  [[ -r "$f" ]] && return 0
+  local -a lines=()
+  say "Keywords you want considered for this page, beyond what the research found."
+  say "One per line. Press enter on an empty line to finish, or straight away for none."
+  read_lines lines
+  mkdir -p "$(dirname "$f")"
+  : > "$f"
+  (( ${#lines[@]} )) && printf '%s\n' "${lines[@]}" > "$f"
+  say "recorded ${#lines[@]} suggested keyword(s) in $f"
+  return 0
+}
+
 need_purpose() { # sets PURPOSE, asking once and reusing it afterwards
   local f; f=$(purpose_file)
   if [[ -r "$f" ]]; then
@@ -336,6 +369,7 @@ action_keywords() {
   need_router || return 1
   need_purpose || return 1
   need_type || return 1
+  need_suggested || return 1
   local dir="$RESEARCH/$SLUG"
   confirm_replace "$dir/keywords.json" "A keyword choice" || { say "kept"; return 0; }
 
@@ -356,13 +390,22 @@ action_keywords() {
       printf '\n' >> "$dir/_keywords_prompt.txt"
       cat "$ROOT/prompts/keywords-type-$TYPE.md" >> "$dir/_keywords_prompt.txt"
     fi
+    # The suggestions are appended the same way and for the same reason: a slug
+    # that suggested nothing gets the prompt it got before this existed.
+    if [[ -s "$(suggested_file)" ]]; then
+      printf '\n' >> "$dir/_keywords_prompt.txt"
+      cat "$ROOT/prompts/keywords-suggested.md" >> "$dir/_keywords_prompt.txt"
+      cat "$(suggested_file)" >> "$dir/_keywords_prompt.txt"
+    fi
     bash "$ROOT/scripts/llm_call.sh" "$dir/_keywords_prompt.txt" 0.2 "$seed" \
          "$ROOT/prompts/keywords.schema.json" > "$dir/keywords.json" || {
       err "the call failed, see the message above. The prompt is kept at $dir/_keywords_prompt.txt"
       return 1
     }
     jq . "$dir/keywords.json"
-    if run_check keywords "$dir/keywords.json" "$dir/research.json"; then
+    local -a sugarg=()
+    [[ -s "$(suggested_file)" ]] && sugarg=("$(suggested_file)")
+    if run_check keywords "$dir/keywords.json" "$dir/research.json" "${sugarg[@]}"; then
       say ""
       say "Read the rationale against your research: it is the one field no check can verify."
       return 0
@@ -557,6 +600,95 @@ run_all() {
   return 0
 }
 
+# --- intake -----------------------------------------------------------------
+# A new page needs four things on disk before any stage can run: the snapshot,
+# your site's URL when the page is not live yet, the keyword exports, and the
+# competitor URLs. The intake asks for each one that is missing and then gets out
+# of the way, so the menu opens on a page that is ready to collect. A page that
+# already has them is not asked anything.
+
+PAGE_IS_LIVE=""   # "", or 1 or 0 once asked
+
+ask_is_live() {
+  local yn
+  read -r -p "Does this page already exist on your site? [y/N] " yn
+  [[ "$yn" == [yY]* ]] && PAGE_IS_LIVE=1 || PAGE_IS_LIVE=0
+}
+
+intake_page() { # the snapshot, and site.txt when there is no live page to read
+  local dir="$RESEARCH/$SLUG"
+  if [[ -r "$dir/page.json" ]]; then
+    [[ -n "$PAGE_IS_LIVE" ]] && say "This page already has a snapshot, so it is kept. Replace it from the Page check stage."
+    return 0
+  fi
+  [[ -n "$PAGE_IS_LIVE" ]] || ask_is_live
+  mkdir -p "$dir"
+  if [[ "$PAGE_IS_LIVE" == 1 ]]; then
+    local url
+    read -r -p "The page's URL: " url
+    if [[ -z "$url" ]]; then
+      warn "no URL, so the snapshot is left for the Page check stage."
+      return 0
+    fi
+    bash "$ROOT/scripts/fetch_page.sh" "$url" "$dir/page.json" || {
+      err "the fetch failed, see the message above. Run the Page check stage from the menu once you have the right URL."
+      return 0
+    }
+    return 0
+  fi
+  bash "$ROOT/scripts/fetch_page.sh" --absent "$dir/page.json" || return 0
+  [[ -r "$dir/site.txt" ]] && return 0
+  local site
+  say "Your site's URL, so your own pages can be read from its sitemap and checked"
+  say "for one already targeting this term. Press enter to skip."
+  read -r -p "Site URL: " site
+  if [[ -n "$site" ]]; then
+    printf '%s\n' "$site" > "$dir/site.txt"
+    say "wrote $dir/site.txt"
+  fi
+}
+
+intake_inputs() { # the keyword exports and the competitor URLs
+  local dir="$RESEARCH/$SLUG"
+  [[ -r "$dir/research.json" ]] && return 0
+  mkdir -p "$dir/inputs"
+
+  local n_inputs
+  n_inputs=$(find "$dir/inputs" -maxdepth 1 -type f \( -name '*.csv' -o -name '*.tsv' -o -name '*.txt' \) | wc -l)
+  if (( n_inputs == 0 )); then
+    local line path
+    say ""
+    say "Keyword exports to use, as you downloaded them (Search Console, Ahrefs)."
+    say "One path per line, blank to finish. A path that is not there is said so"
+    say "and asked again, rather than skipped quietly."
+    while IFS= read -r -p "> " line; do
+      [[ -z "${line//[[:space:]]/}" ]] && break
+      path="${line/#\~/$HOME}"
+      if [[ -r "$path" && -f "$path" ]]; then
+        cp "$path" "$dir/inputs/" && say "  copied $(basename "$path") into $dir/inputs/"
+      else
+        err "  not a readable file, so nothing was copied: $line"
+      fi
+    done
+  fi
+
+  local n_urls=0
+  [[ -r "$dir/competitors.txt" ]] && n_urls=$(grep -cve '^[[:space:]]*$' -e '^[[:space:]]*#' "$dir/competitors.txt")
+  if (( n_urls == 0 )); then
+    local -a urls=()
+    say ""
+    say "Competitor URLs: the 3 to 5 pages really ranking for this term."
+    say "One per line, blank to finish."
+    read_lines urls
+    if (( ${#urls[@]} )); then
+      printf '%s\n' "${urls[@]}" > "$dir/competitors.txt"
+      say "  wrote ${#urls[@]} URL(s) to $dir/competitors.txt"
+    fi
+  fi
+}
+
+intake() { intake_page; intake_inputs; }
+
 # --- slug picking -----------------------------------------------------------
 
 list_slugs() {
@@ -604,18 +736,22 @@ if [[ ! -t 0 ]]; then
 fi
 
 if [[ -z "$SLUG" ]]; then
+  ask_is_live
   pick_slug || exit 0
 elif ! valid_slug "$SLUG"; then
   err "not a valid slug: $SLUG"
   exit 2
 fi
 
+intake
+
 while true; do
   render_menu
   read -r -p "Choose: " choice || { say ""; exit 0; }
   case "$choice" in
     q|Q) exit 0 ;;
-    s|S) pick_slug || exit 0 ;;
+    # Switching pages re-runs the intake, because the page switched to may be new.
+    s|S) PAGE_IS_LIVE=""; pick_slug || exit 0; intake ;;
     a|A) run_all; read -r -p "Press enter for the menu. " _ ;;
     "")  ;;
     [1-9])

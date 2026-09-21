@@ -5,6 +5,9 @@ Local-first SEO content pipeline driven by **Claude Code** (CC) as the runtime a
 ## Design at a glance
 
 ```
+./seo                                        (the front door: intake, then the menu)
+  └─ scripts/seo.sh: stage state from disk, runs the stage you pick
+
 User in Claude Code
   ├─ /seo-research <slug>                    (Phases 6-7 - research, no model call)
   │    ├─ scripts/fetch_page.sh        -> research/<slug>/page.json
@@ -34,7 +37,7 @@ Every scripts/llm_call.sh call → POST localhost:8080/v1/chat/completions
   model qwen, system message prompts/system.md, thinking off
 ```
 
-Phases 1 to 11 are built, so the research reaches the outline. Later phases add metadata and keywords (`meta.json`), a single `/seo-generate` command, and an SEO knowledge base. Later phases add metadata and keywords (`meta.json`), a single `/seo-generate` command, and an SEO knowledge base. See [PLAN.md](PLAN.md) for the full phase breakdown, and [INSTRUCTIONS.md](INSTRUCTIONS.md) for a step-by-step walk through every stage.
+Phases 1 to 13 and 16 to 38 are built, so a page goes from research to a finished article, and `./seo` walks a new page through its inputs first. Later phases add metadata and keywords (`meta.json`), a single `/seo-generate` command, and an SEO knowledge base. See [PLAN.md](PLAN.md) for the full phase breakdown, and [INSTRUCTIONS.md](INSTRUCTIONS.md) for a step-by-step walk through every stage.
 
 ### Why this shape
 - **CC is the harness.** Skills replace a CLI, the Bash tool replaces a workflow engine, and files replace a database.
@@ -46,10 +49,12 @@ Phases 1 to 11 are built, so the research reaches the outline. Later phases add 
 
 ```
 SEO-LLM/
+├── seo                 # the launcher: ./seo [slug], asks which page, then shows the menu
 ├── .claude/
 │   ├── skills/         # one directory per slash command, each holding SKILL.md
-│   └── settings.json   # Bash allow-list: the five entry scripts, the router model check, jq, doc extractors
+│   └── settings.json   # Bash allow-list: the entry scripts, the router model check, jq, doc extractors
 ├── prompts/            # markdown prompt templates with {{PLACEHOLDERS}}, plus system.md (sent on every call)
+│                       # keywords-type-<type>.md and keywords-suggested.md are appended to a filled prompt, never templated into it
 ├── scripts/
 │   ├── seo.sh          # interactive menu: stage status from disk, runs the stage you pick
 │   ├── fetch_page.sh   # polite fetch: robots.txt, per-host delay, cache, extraction (--raw for non-HTML)
@@ -93,33 +98,44 @@ SEO-LLM/
    systemctl --user is-active llama-server
    curl -s localhost:8080/models | jq -er '.data[] | select(.id=="qwen") | .id'
    ```
-2. Open this repo in Claude Code and accept the trust dialog on first run.
-   Confirm the four commands are available by typing `/` and looking for
-   `seo-ingest`, `seo-outline`, `seo-draft`, and `seo-rewrite`.
-3. Get a brief into `briefs/`, either way:
+2. Start a page from the terminal:
+   ```bash
+   # Runs in: local terminal
+   ./seo
+   ```
+   It asks whether the page is live, which page it is, and then for the inputs it
+   is missing, and opens the menu. That is the whole pipeline, and the rest of
+   this section is the same work driven from Claude Code instead.
+3. Open this repo in Claude Code and accept the trust dialog on first run.
+   Confirm the commands are available by typing `/` and looking for
+   `seo-research`, `seo-keywords`, `seo-brief`, `seo-ingest`, `seo-outline`,
+   `seo-draft`, and `seo-rewrite`.
+4. Get a brief into `briefs/`, either way:
    - **From a JSON brief you write.** Copy [briefs/example.json](briefs/example.json) and edit it.
    - **From a document.** Run `/seo-ingest path/to/source.{docx,pdf,md,txt}`, which writes `briefs/<slug>.json` for you to review and edit.
-4. In Claude Code, run the outline first, then the draft:
+5. In Claude Code, run the outline first, then the draft:
    ```
    /seo-outline briefs/example.json
    /seo-draft   briefs/example.json
    ```
    The draft needs the outline, so running `/seo-draft` first stops with a message.
    Then polish it with `/seo-rewrite briefs/example.json`.
-5. Inspect `outputs/<slug>/outline.md`, `outputs/<slug>/draft.md`, and `outputs/<slug>/final.md`.
+6. Inspect `outputs/<slug>/outline.md`, `outputs/<slug>/draft.md`, and `outputs/<slug>/final.md`.
 
 ## The menu
 
-`scripts/seo.sh` is the interactive front door. It shows every stage of a page
-with its state and runs the one you pick.
+`./seo` is the interactive front door. With no slug it asks which page you mean,
+then shows every stage of that page with its state and runs the one you pick. It
+is a wrapper around `scripts/seo.sh`, which can still be called directly, and it
+finds the repository from its own path, so it works from any directory.
 
 ```bash
 # Runs in: local terminal
-bash scripts/seo.sh                 # lists the pages that have research, or starts one
-bash scripts/seo.sh example-domains # straight to that page
+./seo                 # lists the pages that have research, or starts one
+./seo example-domains # straight to that page
 
 # End the pipeline at the brief, for when you write the page yourself.
-SEO_BRIEF_ONLY=1 bash scripts/seo.sh example-domains
+SEO_BRIEF_ONLY=1 ./seo example-domains
 ```
 
 `SEO_BRIEF_ONLY=1` hides the outline, draft and rewrite stages, so the menu is
@@ -144,6 +160,15 @@ router: serving qwen
   a run all ready stages   s switch page   q quit
 ```
 
+- **A new page is walked through its inputs before the menu opens.** `./seo`
+  asks whether the page is already live, then which page it is, and then for
+  whatever is missing on disk: the live page's URL, or your site's URL when it is
+  not live yet, then the keyword exports (paths, one per line, copied into
+  `inputs/`) and the competitor URLs (one per line, written to
+  `competitors.txt`). An export path that is not there is refused by name and
+  asked again rather than skipped quietly, and every question takes a blank
+  answer, which leaves the file for you to place by hand. A page that already has
+  these is asked nothing, so resuming is unchanged.
 - **State comes from the files on disk**, never from a session file, so resuming
   a page you left last month works exactly like resuming one from five minutes
   ago. A stage is `done` when its artifact exists, `ready` when its input does,
@@ -160,6 +185,14 @@ router: serving qwen
   saved to `research/<slug>/type.txt`. Answering `review` shapes the keyword
   choice and the brief's sections. Pressing enter records an empty answer, which
   keeps the generic behaviour and stops the question being asked again.
+- **Your own keyword suggestions are asked for once per page**, after the
+  competitor research and before the keyword choice, and saved to
+  `research/<slug>/suggested.txt`, one per line. The model may return a
+  suggested term even though the research does not carry it, and `check.sh`
+  counts the list as grounding, so the term is not reported as invented. They
+  are candidates, not a shortlist: the model still chooses on demand and fit and
+  will prefer a research term when it fits better. Pressing enter straight away
+  records none, which leaves the prompt exactly as it was.
 - **A failed check offers a reseed rather than retrying silently.** The keyword
   stage offers seed 2, the outline stage offers seeds 2 and 3, and each one says
   what to do when the retries are exhausted.
@@ -217,6 +250,10 @@ with their levels. With no output path it prints to stdout, so it can be piped.
 `scripts/research_collect.sh <slug> [--fresh]` turns what you gathered into one
 `research/<slug>/research.json`. It needs `page.json` and exits 2 without it.
 
+The three inputs below are what the launch intake asks for, so on a new page you
+can type their paths and URLs instead of placing them yourself. Placing them by
+hand works exactly the same, and is how you add to a page later.
+
 - **Keyword exports** go in `research/<slug>/inputs/` as CSV or TSV. The source
   this pipeline is built around is the **Search Console Performance export**
   (`Top queries`, `Clicks`, `Impressions`, `CTR`, `Position`), because those
@@ -258,11 +295,12 @@ the questions the ranking pages answer, and the subtopics they share.
 
 The guard that matters is grounding. `check.sh keywords` FAILs when any keyword
 returned is absent from the research file, comparing against the keyword table,
-the competitor titles and headings, and the existing page. A reworded keyword
-fails the same way an invented one does, because "checklist for technical seo" is
-a different query from "technical seo checklist". The prompt also forbids
-restating the research figures, so volumes and difficulties stay in
-`research.json` where they can be audited, and a repeated figure is a WARN.
+the competitor titles and headings, the existing page, and the keywords you
+suggested at the menu when there are any. A reworded keyword fails the same way
+an invented one does, because "checklist for technical seo" is a different query
+from "technical seo checklist". The prompt also forbids restating the research
+figures, so volumes and difficulties stay in `research.json` where they can be
+audited, and a repeated figure is a WARN.
 
 The word-count target is not set here. It comes from the competitor word counts
 at the brief stage.
@@ -306,9 +344,11 @@ bash scripts/brief_stages.sh about            # each later stage
 bash scripts/brief_stages.sh about --merge    # writes briefs/about.json and checks it
 ```
 
-The structure stage is not merged into the brief: the seven-key brief has nowhere
-to put sections, questions or gaps, so they stay in `02-structure.json` until
-Phase 11 adds those keys.
+The merge carries the research forward: `search_intent` comes from the keyword
+choice, `must_cover` from the structure stage's headings, `questions` from its
+FAQ list, and `existing_page` from the research when the page is live
+(`scripts/brief_stages.sh:237-243`). The stage files stay on disk as the record
+of what was approved.
 
 ## The model wrapper
 
@@ -418,14 +458,15 @@ orphan its outline.
 | Path | Written by | What it is |
 | --- | --- | --- |
 | `research/<slug>/page.json` | `/seo-research` | Whether the page exists, and its title, meta description, headings and word count |
-| `research/<slug>/inputs/*.csv` | you | Keyword and query exports, read by column name |
-| `research/<slug>/competitors.txt` | you | Competitor URLs, one per line |
-| `research/<slug>/site.txt` | you | Your site's URL, when the page is not live yet, so the sitemap can be found |
+| `research/<slug>/inputs/*.csv` | you or the launch intake | Keyword and query exports, read by column name |
+| `research/<slug>/competitors.txt` | you or the launch intake | Competitor URLs, one per line |
+| `research/<slug>/site.txt` | you or the launch intake | Your site's URL, when the page is not live yet, so the sitemap can be found |
 | `research/_sitemaps/<host>.txt` | `/seo-research` | Your own page inventory from the sitemap, fetched once per site |
 | `research/<slug>/research.json` | `/seo-research` | The collected research: merged keywords, competitor pages, the existing page, your matching pages |
 | `research/<slug>/_keywords_prompt.txt` | `/seo-keywords` | The filled keyword prompt |
 | `research/<slug>/keywords.json` | `/seo-keywords` | The target keyword, intent, business potential, questions and subtopics |
 | `research/<slug>/type.txt` | `/seo-keywords` | The content type, recorded once, empty when declined |
+| `research/<slug>/suggested.txt` | `/seo-keywords` | Keywords you suggested, one per line, recorded once and empty when you suggested none |
 | `research/<slug>/brief-stages/purpose.txt` | `/seo-brief` | The one-line page purpose, recorded once and reused by every stage |
 | `research/<slug>/brief-stages/NN-<stage>.json` | `/seo-brief` | One approved brief stage, with its `.prompt.txt`, `.schema.json` and `.prior.json` beside it |
 | `research/_cache/*.body` | `/seo-research` | Cached raw HTML and response status, gitignored |

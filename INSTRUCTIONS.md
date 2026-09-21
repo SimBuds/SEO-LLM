@@ -1,6 +1,13 @@
 # Pipeline flow
 
-The pipeline has six commands, run in order in Claude Code. Each one writes files that the next one reads.
+There are two ways to run the pipeline, and they drive the same scripts and write
+the same files.
+
+- **`./seo`**, the menu, from a terminal. It asks whether the page is live, which
+  page it is, and then for whatever inputs are missing, and shows every stage with
+  its state. See "The menu" below.
+- **The seven `/seo-*` commands in Claude Code**, run in order. Each one writes
+  files that the next one reads, and this document walks through them.
 
 ```
 /seo-research <slug>  ──▶ research/<slug>/page.json + research.json
@@ -45,8 +52,8 @@ The `<slug>` is the brief's file name without `.json`, so a page's research, its
 No model call in this stage. It gathers what the page has to beat.
 
 1. **Does the page exist?** The command asks. Give a URL and it snapshots the live page: title, meta description, H1 to H3 and word count, into `research/<slug>/page.json`. Say no and it records a new page.
-2. **Your exports.** Drop the Search Console Performance export into `research/<slug>/inputs/`, which is the source this pipeline is built around because its numbers are measured rather than estimated. Columns are read by name, so download and drop, with no reshaping, and any other keyword export you happen to have parses as well. Nothing is fetched from Google, and no API key exists anywhere in this repo.
-3. **Competitors.** Put the top 3 to 5 ranking URLs into `research/<slug>/competitors.txt`, one per line. You find them in Google, because the pipeline never fetches a results page.
+2. **Your exports.** `./seo` asks for their paths and copies them in for you. By hand, drop the Search Console Performance export into `research/<slug>/inputs/`, which is the source this pipeline is built around because its numbers are measured rather than estimated. Columns are read by name, so download and drop, with no reshaping, and any other keyword export you happen to have parses as well. Nothing is fetched from Google, and no API key exists anywhere in this repo.
+3. **Competitors.** `./seo` asks for these too, one per line. By hand, put the top 3 to 5 ranking URLs into `research/<slug>/competitors.txt`, one per line. You find them in Google, because the pipeline never fetches a results page.
 4. **Collect:** `scripts/research_collect.sh` merges the exports by keyword, fetches each competitor (obeying `robots.txt`, waiting between requests to one host, caching the HTML), and writes `research/<slug>/research.json`.
    It also builds your own page inventory from your sitemap, once per site, and records which of your pages already target a researched query. For a page that is not live yet, put your site URL in `research/<slug>/site.txt` so it knows where to look.
 5. **`check.sh research`:**
@@ -56,9 +63,9 @@ No model call in this stage. It gathers what the page has to beat.
 
 ## 2. `/seo-keywords <slug>`: research → the target keyword
 
-One model call at temperature 0.2 against `research.json` plus one line from you about what the page is for. It writes `research/<slug>/keywords.json`: the primary keyword, 2 to 6 secondary keywords, the intent (type, format, angle), a business-potential score of 0 to 3, the questions the ranking pages answer, and the subtopics they share.
+One model call at temperature 0.2 against `research.json`, one line from you about what the page is for, the content type, and any keywords you suggested. From the menu the suggestions are asked for once per page and saved to `research/<slug>/suggested.txt`, one per line: the model may return one of them even though the research does not carry it, and it still judges them on demand and fit against the researched terms. It writes `research/<slug>/keywords.json`: the primary keyword, 2 to 6 secondary keywords, the intent (type, format, angle), a business-potential score of 0 to 3, the questions the ranking pages answer, and the subtopics they share.
 
-`check.sh keywords` **fails** when any keyword is missing from the research file, which catches a reworded keyword as well as an invented one, and **warns** when the reasoning repeats research figures or when your live page targets something else.
+`check.sh keywords <keywords.json> <research.json> [suggested.txt]` **fails** when any keyword is missing from the research file, which catches a reworded keyword as well as an invented one. With the optional third argument your suggested keywords count as grounding too, so a term you asked for is not reported as invented, while a term in neither still fails. It **warns** when the reasoning repeats research figures or when your live page targets something else.
 
 ## 3. `/seo-brief <slug>`: research → brief, one stage at a time
 
@@ -71,7 +78,7 @@ Four stages, one model call each. The command stops after every stage so you can
 
 Editing a stage file is usually better than rerunning it, because a rerun is a fresh sample and may change other fields too. `--redo <stage>` rebuilds one and drops every stage after it.
 
-**`--merge`** writes `briefs/<slug>.json` from the approved stages and runs `check.sh brief`. It refuses to overwrite an existing brief without `--force`. The word count is computed from the competitor median, not asked of the model, and the structure stage stays in its own file until Phase 11 gives the brief somewhere to put it.
+**`--merge`** writes `briefs/<slug>.json` from the approved stages and runs `check.sh brief`. It refuses to overwrite an existing brief without `--force`. The word count is computed from the competitor median, not asked of the model. The merge also carries the research forward into the brief's four optional keys: `search_intent` from the keyword choice, `must_cover` and `questions` from the structure stage, and `existing_page` from the research when the page is live.
 
 ## 4. `/seo-ingest <file>`: document → brief
 
@@ -141,9 +148,16 @@ Editing a stage file is usually better than rerunning it, because a rerun is a f
 
 ## The menu
 
-`bash scripts/seo.sh [slug]` runs the whole thing from one place. It reads each
-stage's state from the files on disk, so it always knows what is done, what is
-ready and what is blocked, and picking a number runs that stage.
+`./seo [slug]` runs the whole thing from one place (`scripts/seo.sh` is the script
+behind it, and still works when called directly). It reads each stage's state from
+the files on disk, so it always knows what is done, what is ready and what is
+blocked, and picking a number runs that stage.
+
+With no slug it asks whether the page already exists on your site, then which page
+it is, and then walks a new page through the inputs it is missing: the live page's
+URL, or your site's URL when it is not live yet, the keyword export paths, and the
+competitor URLs. Each question takes a blank answer, and a page that already has
+these is asked nothing.
 
 ```
 SEO pipeline: example-domains
@@ -162,9 +176,10 @@ stage so you read it before the next, and stops at the first failure. From a
 finished brief, one `a` takes you through the outline, the draft, the rewrite
 and the review.
 
-The menu asks the page purpose once and reuses it, checks the router before any
-model call, offers a reseed when a check fails rather than retrying behind your
-back, and always asks before replacing an artifact.
+The menu asks the page purpose, the content type and your suggested keywords once
+each and reuses them, checks the router before any model call, offers a reseed when
+a check fails rather than retrying behind your back, and always asks before
+replacing an artifact.
 
 ## Shared pieces
 
@@ -176,7 +191,8 @@ back, and always asks before replacing an artifact.
 - **`scripts/fetch_sitemap.sh`:** reads your sitemap (and a sitemap index) into a plain URL list, once per site, through the fetcher below.
 - **`scripts/fetch_page.sh`:** the only way this repo reaches the open web. It obeys `robots.txt`, waits between requests to one host, caches the HTML in `research/_cache/`, and pulls out the title, meta description, headings and word count. `FETCH_UA` sets the User-Agent, which carries no contact address by default.
 - **`scripts/research_collect.sh`:** merges your keyword exports by column name and fetches the competitor URLs into one `research.json`.
-- **`scripts/seo.sh`:** the interactive menu. It runs the other scripts and reads state from the artifacts, so it holds no state of its own.
+- **`./seo`:** the launcher at the repo root. It resolves the repository from its own path and hands over to `scripts/seo.sh`, so it works from any directory.
+- **`scripts/seo.sh`:** the interactive menu, and the intake that fills in a new page's inputs before it. It runs the other scripts and reads state from the artifacts, so it holds no state of its own.
 - **`scripts/brief_stages.sh`:** one model call per brief stage, stopping after each for your approval, then `--merge` assembles `briefs/<slug>.json` and computes the word count from the competitor median.
 - **`scripts/fill_prompt.sh`:** fills every prompt from the brief, outline and source text, and fails if a placeholder is left unfilled.
 - **`scripts/check.sh`:** holds every rule (research, brief, outline, section, draft, rewrite). A problem that must be fixed is a FAIL. One worth a look is a WARN.
@@ -198,6 +214,14 @@ back, and always asks before replacing an artifact.
 
 ## Typical run
 
+From the terminal, the whole run is one command:
+
+```
+./seo                                   # answer the intake, then work down the menu
+```
+
+Driven from Claude Code, it is the seven commands in order:
+
 ```
 /seo-research client-page               # answer the page question, add exports and competitor URLs
 /seo-keywords client-page               # pick the target keyword
@@ -213,8 +237,11 @@ back, and always asks before replacing an artifact.
 | Path | Stage | What it is |
 | --- | --- | --- |
 | `research/<slug>/page.json` | research | Whether the page exists, and its current title, description, headings and length |
-| `research/<slug>/inputs/*.csv` | you | The keyword and query exports you downloaded |
-| `research/<slug>/competitors.txt` | you | The competitor URLs you listed |
+| `research/<slug>/inputs/*.csv` | you or the launch intake | The keyword and query exports you downloaded |
+| `research/<slug>/competitors.txt` | you or the launch intake | The competitor URLs you listed |
+| `research/<slug>/site.txt` | you or the launch intake | Your site's URL, when the page is not live yet |
+| `research/<slug>/type.txt` | keywords | The content type, recorded once, empty when declined |
+| `research/<slug>/suggested.txt` | keywords | The keywords you suggested, recorded once, empty when you suggested none |
 | `research/<slug>/research.json` | research | Merged keywords, fetched competitor pages, the existing page |
 | `research/<slug>/keywords.json` | keywords | The target keyword, intent, business potential, questions, subtopics |
 | `research/<slug>/brief-stages/NN-<stage>.json` | brief | One approved stage, with its prompt and schema beside it |

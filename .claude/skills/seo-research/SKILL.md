@@ -65,8 +65,7 @@ This is the first stage of the pipeline, ahead of `/seo-keywords` and
    - the competitor pages fetched, with their word counts and their H2 outlines,
      since those are the gaps the page has to cover
    - every WARN line, and any competitor that failed with its reason
-11. Close with: *"Next: `/seo-keywords <slug>`."* If the user asks to run it, say
-   that stage is not built yet.
+11. Close with: *"Next: `/seo-keywords <slug>`."*
 
 ## Failure handling
 

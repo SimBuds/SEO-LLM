@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# The one command that starts the pipeline: ./seo [slug]
+#
+# With no slug it asks which page you mean and then shows the menu. Everything
+# it does lives in scripts/seo.sh. This resolves the repository from its own
+# path, not from the working directory, so the command behaves the same wherever
+# it is run from, and then hands over.
+exec bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/seo.sh" "$@"
