@@ -34,3 +34,11 @@ them.
 **The `topic` is the page's title, and it may promise the picks**, because the
 author's facts supply them. Name the category and the judgement ("Best cat water
 fountains for hard water"), never a specific product, which you do not know.
+
+**The call to action is about the reader's chosen pick**, such as checking its
+current price or availability, and it names no product itself, because which one
+suits them is what the page just discussed.
+
+**The facts of a roundup are the products the author tested**, one line each,
+saying what each is best at. Without them the picks sections have nothing to
+name, and the page is a guide wearing a roundup's title.

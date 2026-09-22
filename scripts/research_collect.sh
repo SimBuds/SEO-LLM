@@ -198,6 +198,8 @@ skip to|skip to content|keyboard shortcuts|share this|share|follow us|follow via
 newsletter|sign up|subscribe|categories|archives|tags|related posts|you may also like|
 recent posts|comments?|[0-9]+ comments?|one comment|leave a reply|leave a comment|
 privacy policy|terms of service|contact|contact us|cart|account|my account|
+clear your cart|clear your code|clear your bag|shopping cart|view cart|your cart|
+close|close menu|skip to main content|main menu|
 footer|navigation|breadcrumb|quick links|customer service|shipping|returns)$'
 FURNITURE=$(tr -d '\n' <<< "$FURNITURE")
 DROPPED_HEADINGS=0
@@ -221,7 +223,8 @@ if [[ -r "$URLS_FILE" ]]; then
       before=$(jq '[.headings[]?] | length' <<< "$page")
       page=$(jq --arg f "$FURNITURE" '
         .headings = [.headings[]? | select((.text | ascii_downcase
-                     | gsub("^\\s+|\\s+$"; "") | test($f)) | not)]' <<< "$page")
+                     | gsub("^\\s+|\\s+$"; "") | gsub("[?!.:,]+$"; "")
+                     | test($f)) | not)]' <<< "$page")
       after=$(jq '[.headings[]?] | length' <<< "$page")
       DROPPED_HEADINGS=$(( DROPPED_HEADINGS + before - after ))
       COMPETITORS=$(jq --argjson p "$page" '. + [$p + {fetched: true}]' <<< "$COMPETITORS")

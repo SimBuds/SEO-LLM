@@ -62,7 +62,7 @@ brief_valid() {
     and (if has("search_intent") then (.search_intent | type == "object"
            and all(.type, .format, .angle; type == "string" and length > 0)) else true end)
     and (if has("content_type") then
-           (.content_type as $c | ["review","roundup","guide"] | index($c) != null) else true end)
+           (.content_type as $c | ["review","roundup","guide","how-to"] | index($c) != null) else true end)
     and (if has("must_cover") then (.must_cover | type == "array"
            and all(.[]; type == "string" and length > 0)) else true end)
     and (if has("questions") then (.questions | type == "array"
@@ -327,6 +327,12 @@ research)
   if [[ -n "$MARKETS" && "$MARKETS" == *,* ]]; then
     warn "the keywords come from more than one market ($MARKETS): their volumes are not comparable, and the same term appears once per market"
   fi
+  # A competitor "article" of 60,273 words is the extractor reading a storefront,
+  # not a long page. Said here, at collection, rather than three stages later when
+  # it has already become a word-count target.
+  ODD=$(jq -r '[.competitors[]? | select(.fetched and ((.word_count // 0) > 8000 or ((.word_count // 0) > 0 and (.word_count // 0) < 150)))
+                | "\(.url) (\(.word_count) words)"] | join("; ")' "$RESEARCH")
+  [[ -z "$ODD" ]] || warn "competitor word count is implausible, so the page's own text was probably not what was measured: $ODD"
   DROPPED=$(jq -r '.headings_dropped // 0' "$RESEARCH")
   (( DROPPED == 0 )) || warn "$DROPPED competitor heading(s) were dropped as page furniture (About, Help, comments and the like), so they cannot be mistaken for subtopics"
   OK=$(jq '[.competitors[] | select(.fetched)] | length' "$RESEARCH")

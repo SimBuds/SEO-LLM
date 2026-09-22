@@ -401,6 +401,25 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - Files: `scripts/brief_stages.sh`, the three `brief-type-*.md`, `README.md`.
 - A guide-typed brief had come out titled "Best Cat Water Fountains: Top Picks" over criteria sections, because only the structure stage knew the type. Each type now states what its `topic` may promise.
 
+### Phases 61 to 65: What three measured runs changed (done 2026-09-22)
+- Files: `scripts/seo.sh`, `scripts/check.sh`, `scripts/lib_parts.sh`, `scripts/research_collect.sh`, `prompts/*`, `README.md`, `INSTRUCTIONS.md`.
+- A stage whose input is strictly newer than its artifact reads `stale`, not `done`: a brief rebuilt in the morning had left an outline and a final from the night before sitting at `done`, and the review stage reported a superseded article's lengths.
+- Three runs of the same brief at different seeds produced the evidence for the rest: a costs section with no cost data invented prices 3 times out of 3, the flat keyword cap of 2 warned on every run of a correct article, and the absolute-wording check flagged maintenance instructions every time.
+- 62: no section may be about a figure the research cannot supply. 63: the keyword cap is `word_count / 250`, floor 2. 64: temporal "every week" and imperative instructions are not overclaims.
+- 65 was reverted: giving the part prompts an explicit word range instead of a percentage left parts at 127% and 139% of budget and made the finished articles longer. Recorded as a failure with its numbers.
+
+### Phases 66 to 68: Sizing, naming, and accepting figures (done 2026-09-22)
+- Files: `scripts/brief_stages.sh`, `scripts/fill_prompt.sh`, `scripts/check.sh`, `scripts/seo.sh`, `scripts/lib_parts.sh`, `prompts/brief-structure.md`, `README.md`, `INSTRUCTIONS.md`.
+- The structure stage receives the target length and a section ceiling, and `fill_prompt.sh` derives the same band for the outline from the brief's `word_count`. A brief that produced 9 topic sections against a 3-5 table produced 5. Telling the outline prompt to "group subtopics" had been tried first and measured worse.
+- `proper_noun_keywords` no longer reads the brief's `topic`: a Title Case title made every ordinary word look like a lowercased brand and fired on 4 of 5 keywords.
+- `n` at the menu lists every figure the facts do not support, in its sentence, and takes the ones the author vouches for into the facts source before redoing the facts stage and the merge. A procedural page cannot pass its own number check without this, by construction.
+
+### Phases 69 to 73: The word count, the types, and the furniture (done 2026-09-22)
+- Files: `scripts/fetch_page.sh`, `scripts/brief_stages.sh`, `scripts/research_collect.sh`, `scripts/check.sh`, `prompts/*-type-how-to.md`, `prompts/brief.schema.json`, `README.md`.
+- `fetch_page.sh` strips whole regions (script, style, nav, header, footer, aside, form, svg, template, comments) before counting, because `sed` cannot match non-greedily and a Shopify page with its catalogue inlined measured 60,273 words. The four collected competitors went from 17969, 60273, 1700 and 2277 words to 1725, 1505, 997 and 1318.
+- `target_words()` excludes counts outside 150 to 8000 before taking the median and says what it ignored, so the 600-to-3000 clamp can no longer turn a 39,121-word median into a confident 3000.
+- `how-to` joins review, roundup and guide, and every brief stage now reads the type, so the call to action and the facts question are shaped by what kind of page it is.
+
 ### Phase 15: Docs + SEO knowledge base
 - Files: `README.md`, `docs/google/{helpful-content,eeat,semantic-search,ai-content-guidelines}.md`, link from system prompt.
 - Goal: prompts ground in EEAT / helpful-content guidance, and the quickstart is documented.

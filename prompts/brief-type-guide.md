@@ -35,3 +35,11 @@ naming products it has none of.
 about what something costs, how loud it is or how long it lasts need figures the
 page does not have. Name what the reader should compare instead, and let them
 read the numbers off the product they are looking at.
+
+**The call to action is something the reader does in the world**: measure the
+space, check the water hardness, watch how the animal drinks. It may not point at
+a section of this page, and it may not promise a recommendation the page does not
+make.
+
+**A guide needs no facts to be honest**, and any it has are evidence for a
+criterion rather than a product to sell.

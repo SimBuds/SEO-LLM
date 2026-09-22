@@ -184,11 +184,15 @@ router: serving qwen
 - **The content type is asked once per page**, before the keyword choice, and
   saved to `research/<slug>/type.txt`. Three are built, each shaping the keyword
   choice, the page's title and the brief's sections: `review` for one product you have used,
-  `roundup` for several you have tested and will supply as facts, and `guide` for
-  a page that teaches the choice and names no product. Pressing enter records an
+  `roundup` for several you have tested and will supply as facts, `guide` for
+  a page that teaches the choice and names no product, and `how-to` for the steps
+  of a task in the order they are performed, which writes a step needing a
+  quantity as an instruction to you rather than inventing the figure. Pressing enter records an
   empty answer, which keeps the generic behaviour and stops the question being
   asked again. A type's guidance is appended to the filled prompt rather than
-  templated into it, so an untyped page produces the prompt it always did.
+  templated into it, so an untyped page produces the prompt it always did, and
+  every brief stage sees it: the type shapes the page's title, its sections, the
+  call to action and what the facts stage asks you for.
 - **Nothing needs a hand edit.** Every value the pipeline cannot derive is asked
   for: the page purpose, the content type, your keyword suggestions, the facts
   the page may state, the primary keyword to confirm or swap, and the word count.
@@ -283,7 +287,13 @@ bash scripts/fetch_page.sh --absent research/new-service/page.json
 
 `scripts/fetch_page.sh <url> [out.json]` writes the page's SEO surface as JSON:
 `title`, `meta_description`, `word_count`, and `headings` as a list of H1 to H3
-with their levels. With no output path it prints to stdout, so it can be piped.
+with their levels. The word count measures the page's text: whole regions go
+first (`script`, `style`, `noscript`, `nav`, `header`, `footer`, `aside`, `form`,
+`svg`, `template`, `select`, and HTML comments), then the remaining tags. That
+matters because `sed` cannot match non-greedily, so the previous pair of
+expressions left any script holding angle brackets in place: two ordinary blog
+posts measured 17,969 and 60,273 words, and now measure 1,725 and 1,505. An
+unclosed opening tag drops everything after it rather than counting it. With no output path it prints to stdout, so it can be piped.
 
 - **It obeys `robots.txt`** for the User-Agent it sends, using the standard
   longest-match rule, and exits 3 rather than fetching a disallowed path. A
@@ -421,7 +431,13 @@ Two deliberate choices in the merge:
 
 - **`word_count` is computed, not generated.** It is the median of the competitor
   word counts actually fetched, rounded to 50 and clamped to 600 to 3000, or 1000
-  when no competitor page was fetched. A number the research already implies
+  when no competitor page was fetched. A count outside 150 to 8000 words is
+  excluded first, because that is the extractor reading a storefront rather than
+  an article, and the run says how many it ignored. When every count is
+  implausible it uses the default and says so, rather than letting the clamp turn
+  a 39,121-word median into a confident-looking 3000, which is what it did on a
+  real page before this existed. `check.sh research` names such a competitor at
+  collection time. A number the research already implies
   should be auditable rather than sampled.
 - **Facts come only from your source document.** With no `briefs/_ingest/<slug>.txt`
   the facts list is written empty and no call is made, because a page with no
@@ -533,6 +549,7 @@ The edit is checked against its input with `check.sh rewrite`: identical heading
 | `outline <outline.md> <brief.json>` | not exactly one H1, missing FAQ/Conclusion, any body text, an H2 without an Intent line | section or FAQ counts outside the size table, H3s under Conclusion, lowercase keyword pasted into a heading |
 | `section <part.md> <block.md or -> <words> <brief.json>` | headings differ from the block (or any heading in the intro), guidance lines or code fence left in, CTA missing from the conclusion, more than 140% of the word budget | words outside 60 to 125% of the budget, bolded keyword |
 | `rewrite <new.md> <old.md> <brief.json>` | headings changed, length outside 50 to 120%, CTA added where there was none, numbers absent from the input and facts, more absolute-wording sentences, CTA sentence lost, a keyword used more often than the draft used it | bold left in |
+| `stage <structure-stage.json> <research.json> <keywords.json>` | a section whose `source` names evidence that is in neither the research nor the keyword choice | more than half the sections trace only to the page purpose |
 | `targets <targets-stage.json> <research.json>` | the call to action names a brand or business absent from the research | |
 | `truncated <data.json> <schema.json>` | a string sitting exactly on its schema `maxLength`, meaning the reply was cut off mid-word | |
 | `research <research.json>` | the file does not match the expected shape | no keywords, no volume column anywhere, no competitors, fewer than 3 fetched, a competitor that failed, an existing page with no title or no meta description |

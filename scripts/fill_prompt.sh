@@ -87,6 +87,11 @@ FILLED=$(jq -nrj --rawfile t "$TEMPLATE" --argjson b "$BRIEF_JSON" \
 
 # Check the template, not the filled text: source documents may contain {{…}}.
 LEFT=$(grep -oE '\{\{[A-Z_]+\}\}' "$TEMPLATE" | sort -u | while read -r p; do
+  # An explicit --set satisfies any placeholder, whatever else could have filled
+  # it. Without this, a value the caller passed by hand was still reported as
+  # unfilled when the same name was also derivable from a brief that was not
+  # given, which is what the structure stage hit with MAX_SECTIONS.
+  if jq -e --arg k "${p:2:${#p}-4}" 'has($k)' <<< "$EXTRA" > /dev/null; then continue; fi
   case "$p" in
     "{{OUTLINE}}") [[ -n "$OUTLINE" ]] || echo "$p" ;;
     "{{SOURCE_TEXT}}") [[ -n "$SOURCE" ]] || echo "$p" ;;

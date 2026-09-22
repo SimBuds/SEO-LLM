@@ -108,7 +108,8 @@
       "enum": [
         "review",
         "roundup",
-        "guide"
+        "guide",
+        "how-to"
       ]
     }
   },

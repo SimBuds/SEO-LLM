@@ -189,8 +189,34 @@ DESC=$({ grep -oiE '<meta[^>]+name[[:space:]]*=[[:space:]]*"?description"?[^>]*>
 HEADINGS=$({ grep -oiE '<h[1-3][^>]*>[^<]*(<[^/][^>]*>[^<]*)*</h[1-3]>' <<< "$FLAT" |
   sed -E 's#^<(h[1-3])[^>]*>#\1\t#I; s#</h[1-3]>$##I; s#<[^>]*>##g; s# +# #g; s#\t #\t#; s# $##' |
   grep -vE $'^h[1-3]\t*$'; } || true)
-# Body text for the word count: drop script and style blocks, then all tags.
-WORDS=$({ sed -E 's#<script[^>]*>[^<]*(<[^/][^>]*>[^<]*)*</script>##gI; s#<style[^>]*>[^<]*</style>##gI; s#<[^>]*># #g' <<< "$FLAT" |
+# Body text for the word count: whole regions go first, then the remaining tags.
+# sed cannot match non-greedily, so the old pair of expressions left any script
+# holding angle brackets in place, and a Shopify page with its catalogue inlined
+# as JSON measured 60,273 words (2026-09-22). Site chrome is dropped for the same
+# reason: a navigation menu is not the page's text.
+strip_regions() {
+  awk '''
+    function strip(tag,   s, rest, e, out) {
+      out = ""
+      while (1) {
+        s = match($0, "<" tag "[^>]*>")
+        if (!s) break
+        rest = substr($0, RSTART + RLENGTH)
+        out = out substr($0, 1, RSTART - 1) " "
+        e = match(rest, "</" tag "[^>]*>")
+        if (!e) { $0 = ""; break }           # unclosed: the rest is not text
+        $0 = substr(rest, RSTART + RLENGTH)
+      }
+      $0 = out $0
+    }
+    {
+      gsub(/<!--([^-]|-[^-])*-->/, " ")
+      split("script style noscript nav header footer aside form svg template select", t, " ")
+      for (i in t) strip(t[i])
+      print
+    }'''
+}
+WORDS=$({ strip_regions <<< "$FLAT" | sed -E 's#<[^>]*># #g' |
   tr -s ' ' '\n' | grep -c '[A-Za-z0-9]'; } || true)
 
 JSON=$(jq -n \

@@ -36,3 +36,12 @@ than invented.
 plainest form the research uses for it. It may say that this is a review. It may
 not state a verdict, a score or a superlative, because you have not used the
 product.
+
+**The call to action is the decision about this product**, and the reader has
+just been told whether it is worth buying. Point them at that decision, not at a
+section of the page, and never promise a price, a discount or a warranty the
+author has not stated.
+
+**The facts of a review are the author's own use**: how long they ran it, in what
+household, what failed and when. A fact from a competitor page is not this
+author's experience and does not belong here.

@@ -170,13 +170,15 @@ run_stage() { # run_stage <index> <stage>
   fi
 
   bash "$HERE/fill_prompt.sh" "${fill[@]}" > "$prompt"
-  # The intent and structure stages are type-aware: one names the page and the
-  # other decides its sections, and those are the two answers a content type
-  # changes. A guide titled "Best ... Top Picks" over criteria sections is what
-  # happens when only the second one knows (measured 2026-09-22). The block is
+  # Every stage is type-aware now: intent names the page, structure decides its
+  # sections, targets writes the call to action and facts decides what the author
+  # must supply, and a content type changes all four. A guide titled "Best ... Top
+  # Picks" over criteria sections is what happened when only structure knew
+  # (measured 2026-09-22), and a how-to whose facts nobody asked for is what
+  # produced invented soak times. The block is
   # appended to the filled prompt rather than filled into the template, so a run
   # with no type produces a byte-identical prompt to before this flag existed.
-  if [[ ( "$stage" == structure || "$stage" == intent ) && -n "$RECORDED_TYPE" ]]; then
+  if [[ -n "$RECORDED_TYPE" ]]; then
     local recorded type_file
     recorded="$RECORDED_TYPE"
     type_file="prompts/brief-type-$recorded.md"
@@ -217,8 +219,15 @@ run_stage() { # run_stage <index> <stage>
 # The length target is computed, never asked of the model: the median of the
 # competitor pages that were actually fetched, rounded to 50 and clamped. A
 # number the research already implies should be auditable, not sampled.
+# A page is plausibly an article between these two. Outside them the count is not
+# a long article, it is the extractor reading a whole storefront: two competitors
+# on a real page measured 17,969 and 60,273 words, whose median of 39,121 the
+# clamp below turned into a confident-looking 3000 (2026-09-22).
+ARTICLE_MIN_WORDS=150
+ARTICLE_MAX_WORDS=8000
+
 target_words() {
-  local counts median
+  local counts median dropped kept
   # A brief that already exists carries the length the human settled on, and a
   # redo must not silently go back to the competitor median they overrode.
   local existing="${BRIEFS_DIR:-briefs}/$SLUG.json"
@@ -231,6 +240,15 @@ target_words() {
     echo "$DEFAULT_WORDS"
     return 0
   fi
+  kept=$(awk -v lo="$ARTICLE_MIN_WORDS" -v hi="$ARTICLE_MAX_WORDS" '$1 >= lo && $1 <= hi' <<< "$counts")
+  dropped=$(( $(grep -c . <<< "$counts") - $(grep -c . <<< "${kept:-}") ))
+  if [[ -z "$kept" ]]; then
+    echo "every competitor word count is implausible ($(paste -sd', ' <<< "$counts")), so the length is the $DEFAULT_WORDS-word default rather than a measurement" >&2
+    echo "$DEFAULT_WORDS"
+    return 0
+  fi
+  (( dropped > 0 )) && echo "ignored $dropped implausible competitor word count(s) when taking the median" >&2
+  counts="$kept"
   median=$(awk '{a[NR]=$1} END {print (NR % 2) ? a[(NR+1)/2] : int((a[NR/2] + a[NR/2+1]) / 2)}' <<< "$counts")
   median=$(( (median + 25) / 50 * 50 ))
   (( median < MIN_WORDS )) && median=$MIN_WORDS

@@ -315,12 +315,13 @@ need_type() { # sets TYPE, asking once and reusing it afterwards
   say "  review   one product you have used"
   say "  roundup  several products you have tested, and you will supply them as facts"
   say "  guide    how to choose, naming no product"
+  say "  how-to   the steps for doing something, in order"
   say "  (enter)  a general article"
   read -r -p "Type: " TYPE
   TYPE="${TYPE//[[:space:]]/}"
   TYPE="${TYPE,,}"
   if [[ -n "$TYPE" && ! -r "$ROOT/prompts/brief-type-$TYPE.md" ]]; then
-    err "unknown content type: $TYPE (accepted: review, roundup, guide, or empty for a general article)"
+    err "unknown content type: $TYPE (accepted: review, roundup, guide, how-to, or empty for a general article)"
     return 1
   fi
   mkdir -p "$(dirname "$f")"
