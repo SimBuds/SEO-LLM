@@ -33,7 +33,7 @@ This is the first stage of the pipeline, ahead of `/seo-keywords` and
    - New page: say the folder is open and nothing was fetched.
    - Existing page: the title with its character count, whether a meta
      description is present and its length, the heading outline, and the word
-     count. Name anything off the SEO-GUIDE.md targets, which are a title of 50
+     count. Name anything off the targets of a title of 50
      to 60 characters, a meta description of 150 to 160, and exactly one H1.
 7. Ask for the research inputs, all optional:
    - **The Search Console Performance export** in `research/<slug>/inputs/`,
@@ -51,7 +51,7 @@ This is the first stage of the pipeline, ahead of `/seo-keywords` and
      each other and are not real traffic. If the user has neither export, carry
      on with the competitor pages alone.
    - **Competitors** in `research/<slug>/competitors.txt`, one URL per line,
-     `#` comments allowed. SEO-GUIDE.md asks for the top 3 to 5 ranking pages
+     `#` comments allowed. Top 3 to 5 ranking pages
      for the target query. The user finds them in Google. Never fetch a search
      engine results page to find them yourself.
 8. Collect: `bash scripts/research_collect.sh <slug>`. It merges the exports by

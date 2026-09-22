@@ -59,7 +59,7 @@ User in Claude Code
                            (REWRITE_MODEL) + verify.md                        → rewrite/*, final.md
 ```
 
-Phases 6 to 13, 16 to 32 and 33 to 38 are built, so the research stage runs end to end (page check, competitor and export collection, keyword choice, a staged brief builder, the research detail reaching the outline), and `./seo` is the front door that walks a new page through its inputs and then runs any stage. Planned next are a metadata pass writing `meta.json` (Phase 14), and an SEO knowledge base grounding the prompts in `SEO-GUIDE.md` plus a `/seo-generate` skill (Phase 15).
+Phases 6 to 13, 16 to 32 and 33 to 38 are built, so the research stage runs end to end (page check, competitor and export collection, keyword choice, a staged brief builder, the research detail reaching the outline), and `./seo` is the front door that walks a new page through its inputs and then runs any stage. Planned next are a metadata pass writing `meta.json` (Phase 14), and a `/seo-generate` skill (Phase 15). The knowledge-base half of Phase 15 rested on `SEO-GUIDE.md`, which was removed from the repo on 2026-09-22, so it needs a new source before it means anything.
 
 The research stage ahead of ingest was added 2026-09-20. Search Console data arrives as files the user exports, never through an API, so the pipeline needs no keys and breaks nobody's terms of service. Search engine results pages are never scraped. Measured first-party data is preferred, and third-party keyword estimates are the accepted fallback when Search Console has no history for the page, which is the case for a new site or a topic the site has never ranked for. The CSV parser reads a volume column either way. Estimates were dropped outright on 2026-09-20 and reinstated as a fallback on 2026-09-21, because the first-party-only rule left a pre-launch site with nothing but competitor headings to choose from.
 
@@ -111,8 +111,7 @@ SEO-LLM/
 ├── AGENTS.md
 ├── INSTRUCTIONS.md          # stage-by-stage walk through the pipeline
 ├── PLAN.md
-├── README.md
-└── SEO-GUIDE.md           # the SEO reference behind the pipeline (no script parses it, but check.sh mirrors its targets)
+└── README.md
 ```
 
 ---
@@ -224,7 +223,7 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - Files: `scripts/draft_sections.sh`, `prompts/intro.md`, `prompts/section.md` (now per section), `prompts/conclusion.md`, `seo-draft` skill.
 - Goal: each outline section → its own model call, stitched into `draft.md` (the rewrite phase produces `final.md`).
 - Each part then gets a fact-verification call (`prompts/verify.md`) whose replacements are applied only when they pass deterministic guards (see README).
-- Failure handling as implemented: a failed section check is retried once with seed 2 (not a higher temperature: the same seed repeats the output, a new seed does not), then saved as `sections/NN-<heading>.ERROR.md`.
+- Failure handling as implemented: a failed section check is retried at a new seed (not a higher temperature: the same seed repeats the output, a new seed does not), then saved as `sections/NN-<heading>.ERROR.md`. Widened to two retries in Phase 74 after two failures at consecutive seeds turned out to have different causes.
 
 ### Phase 5: Humanization rewrite (done 2026-09-16)
 - Files: `prompts/rewrite.md`, `scripts/rewrite_sections.sh`, `.claude/skills/seo-rewrite/SKILL.md`, `check.sh rewrite`.
@@ -259,7 +258,7 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - Goal: stop the verifier's punctuation tidy from deleting the space before a dotted token (".example", ".org", ".json"), and stop the absolute-wording pattern splitting a sentence inside "example.com".
 - Both were found by a full end-to-end QA run and reproduced minimally before the fix.
 
-### Phase 13: SEO-GUIDE.md expanded to baseline and intermediate (done 2026-09-20)
+### Phase 13: SEO-GUIDE.md expanded to baseline and intermediate (done 2026-09-20, the file was removed from the repo on 2026-09-22; the entries below are the record of work on a file that no longer exists)
 - Files: `SEO-GUIDE.md`, `README.md`, `PLAN.md`.
 - Goal: the guide covers the fundamentals and the intermediate practice, so it can ground the prompts in the knowledge-base phase.
 - Added a measurement and tooling module, search intent types and SERP features, white hat against black hat, E-E-A-T, the helpful-content and AI-content position, structured data, cannibalization and topic clusters, local SEO, a measurement module, a glossary, and an appendix mapping the guide to the pipeline. Its title, meta description and competitor-count targets are mirrored in `scripts/check.sh`, so they are locked.
@@ -419,6 +418,12 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - `fetch_page.sh` strips whole regions (script, style, nav, header, footer, aside, form, svg, template, comments) before counting, because `sed` cannot match non-greedily and a Shopify page with its catalogue inlined measured 60,273 words. The four collected competitors went from 17969, 60273, 1700 and 2277 words to 1725, 1505, 997 and 1318.
 - `target_words()` excludes counts outside 150 to 8000 before taking the median and says what it ignored, so the 600-to-3000 clamp can no longer turn a 39,121-word median into a confident 3000.
 - `how-to` joins review, roundup and guide, and every brief stage now reads the type, so the call to action and the facts question are shaped by what kind of page it is.
+
+### Phase 75: A heading wrapped in a span is still a heading (done 2026-09-22)
+- Files: `scripts/fetch_page.sh`, `README.md`.
+- The heading pattern allowed nested opening tags but not closing ones, so `<h2><span>Title</span></h2>` matched nothing. On a cached competitor it extracted 8 headings where the page has 31.
+- Consequence for everything upstream of the brief: `must_cover`, `gaps`, the intent read and the grounding haystack `check.sh stage` traces against had all been working from about a quarter of the competitors' structure. Both briefs were rebuilt on the corrected research: the cleaning page's sections now trace to competitor H3s with none resting on the page purpose, and the fountain page's `must_cover` went from one competitor's table of contents to six buying criteria.
+- Three schema caps were raised on evidence from `check.sh truncated` while rebuilding: `gaps` 200 to 400, `cta` 120 to 200, `cta_reason` 300 to 500.
 
 ### Phase 15: Docs + SEO knowledge base
 - Files: `README.md`, `docs/google/{helpful-content,eeat,semantic-search,ai-content-guidelines}.md`, link from system prompt.

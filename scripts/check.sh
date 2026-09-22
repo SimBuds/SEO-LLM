@@ -345,14 +345,16 @@ research)
   TOTAL=$(jq '.competitors | length' "$RESEARCH")
   (( TOTAL > 0 )) || warn "no competitor pages: add URLs to competitors.txt for intent and gap analysis"
   (( OK == TOTAL )) || warn "$((TOTAL - OK)) of $TOTAL competitor pages could not be fetched:"$'\n'"$(jq -r '.competitors[] | select(.fetched | not) | "  " + .url + ": " + (.error // "unknown")' "$RESEARCH")"
-  (( TOTAL == 0 || OK >= 3 )) || warn "only $OK fetched: SEO-GUIDE.md asks for the top 3 to 5 competitor pages"
+  # Three to five fetched competitor pages is what the intent read and the gap
+  # analysis need; below that the brief leans on the keyword table instead.
+  (( TOTAL == 0 || OK >= 3 )) || warn "only $OK competitor page(s) fetched; the intent read and the gaps want 3 to 5"
   if jq -e '.existing_page.exists' "$RESEARCH" > /dev/null; then
     jq -e '.existing_page.title | length > 0' "$RESEARCH" > /dev/null || warn "the existing page has no title tag"
     jq -e '.existing_page.meta_description | length > 0' "$RESEARCH" > /dev/null || warn "the existing page has no meta description"
   fi
   # Your own pages that already target one of these queries. Two pages chasing
   # one query split their signals, so this is a decision to make before writing,
-  # not after (see SEO-GUIDE.md, keyword mapping and cannibalization).
+
   OWN=$(jq -r '(.site_pages.matching // []) | length' "$RESEARCH")
   if (( OWN > 0 )); then
     warn "$OWN of your own pages already target a researched query, so consider updating one instead of adding another:"$'\n'"$(jq -r '.site_pages.matching[] | "  \(.keyword): \(.url)"' "$RESEARCH" | head -5)"

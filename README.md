@@ -74,7 +74,7 @@ SEO-LLM/
 ├── INSTRUCTIONS.md     # stage-by-stage walk through the whole pipeline
 ├── PLAN.md             # architecture + phased MVP plan
 ├── README.md
-└── SEO-GUIDE.md        # the SEO reference behind the pipeline: fundamentals, intermediate practice, glossary
+behind the pipeline: fundamentals, intermediate practice, glossary
 ```
 
 ## Prerequisites
@@ -287,7 +287,14 @@ bash scripts/fetch_page.sh --absent research/new-service/page.json
 
 `scripts/fetch_page.sh <url> [out.json]` writes the page's SEO surface as JSON:
 `title`, `meta_description`, `word_count`, and `headings` as a list of H1 to H3
-with their levels. The word count measures the page's text: whole regions go
+with their levels. A heading counts whatever markup is nested inside it: the
+pattern allows any inner content that is not the closing heading tag, because
+`<h2><span>Title</span></h2>` is the commonest heading markup there is and the
+earlier pattern, which permitted nested opening tags only, skipped it entirely.
+Measured 2026-09-22 on a cached competitor: 8 headings extracted where the page
+has 31, and the 23 missed were its whole article structure, which is why
+`must_cover` had been drawn from the keyword table rather than from competitor
+outlines. The word count measures the page's text: whole regions go
 first (`script`, `style`, `noscript`, `nav`, `header`, `footer`, `aside`, `form`,
 `svg`, `template`, `select`, and HTML comments), then the remaining tags. That
 matters because `sed` cannot match non-greedily, so the previous pair of
@@ -371,7 +378,7 @@ hand works exactly the same, and is how you add to a page later.
   contains every significant word of a researched query. That list is the
   cannibalization check, and those URLs are your internal link candidates.
 - `check.sh research` FAILs only on a broken shape. Thin research (no exports, no
-  competitors, fewer than the 3 to 5 pages SEO-GUIDE.md asks for) is a WARN,
+  competitors, fewer than the 3 to 5 pages) is a WARN,
   because a topic with no tool data is a real case.
 
 Search engine results pages are never fetched, and no search or SEO-tool API is
@@ -527,7 +534,7 @@ and an outline missing something real still fails its check.
 - **Parts.** `00-intro` (no heading, since the H1 is added at stitch time), then one part per H2 in outline order. The FAQ uses `prompts/section.md`, and the Conclusion uses `prompts/conclusion.md`, which ends on the brief's CTA.
 - **Budget.** The draft aims at 120% of `word_count`, lowered from 135% on 2026-09-21 after two runs measured the rewrite cutting 13% and 17.5% rather than the 20 to 35% the old factor assumed, which put an article 39% over its target (`DRAFT_FACTOR` overrides). A lower factor for short pages left a thin-facts page 28% short, so the factor is the same at every length. A page that keeps some drafted text can overshoot, which only warns. Of that total: intro about 8%, conclusion about 6%, FAQ 60 words per question (at most 20%), and the rest split across topic sections by their H3 count. Each prompt asks for 90 to 110% of its budget.
 - **Keywords.** Each primary keyword keeps its cue in only the first two parts that list it (the intro counts as one use of the first keyword), and the FAQ gets none, because the model stuffs cues into its questions.
-- **Repairs.** After each call the script puts the outline's heading wording back when the heading structure matches, and strips bold. Then `check.sh section` runs. A failure is retried once with seed 2, and a second failure is saved as `.ERROR.md` and stops the run.
+- **Repairs.** After each call the script puts the outline's heading wording back when the heading structure matches, and strips bold. Then `check.sh section` runs. A failure is retried at the next two seeds (`DRAFT_SEED`, default 1, then +1 and +2), because the failures at different seeds have different causes: one live part came back 56% over budget at the first seed and fitted the budget by dropping a heading at the second. A third failure is saved as `.ERROR.md` and stops the run.
 - **Fact verification.** Each passing part gets a second call (`prompts/verify.md`, schema-constrained, temperature 0.1) that lists sentences the facts do not support, typed `invented`, `strengthened`, or `contradiction`, each with a replacement. The script applies replacements as literal swaps and rejects any that is not found verbatim, touches the CTA sentence, brings in words absent from the sentence and the facts (compared by first four letters), or, for `strengthened`, drops over half the sentence. Everything is logged in `sections/NN-<heading>.verify.json`. The original text stays in `.unverified.md`, and is restored if the verified part fails its check. Rejected issues remain in the draft for review. `VERIFY_MODEL=gemma` runs the verifier on Gemma instead. On the About test page the two flagged nearly the same sentences at the same speed.
 - **Resume.** Rerunning skips parts that exist and pass. Parts are discarded when `outline.md` is strictly newer than them, and by `--fresh`. Strictly, because the old test also fired when a part and the outline shared a timestamp to the second, which discarded a whole draft after a file copy. `DRAFT_SEED` moves the seed pair the loop tries, which is how the menu's `p` redraws one part.
 
@@ -552,6 +559,14 @@ The edit is checked against its input with `check.sh rewrite`: identical heading
 | `stage <structure-stage.json> <research.json> <keywords.json>` | a section whose `source` names evidence that is in neither the research nor the keyword choice | more than half the sections trace only to the page purpose |
 | `targets <targets-stage.json> <research.json>` | the call to action names a brand or business absent from the research | |
 | `truncated <data.json> <schema.json>` | a string sitting exactly on its schema `maxLength`, meaning the reply was cut off mid-word | |
+
+A `maxLength` truncates the reply rather than rejecting it, so a capped field
+arrives cut mid-word and nothing downstream can tell. `check.sh truncated` runs on
+every brief stage as it is written, and three caps have been raised on its
+evidence: `gaps` 200 to 400, `cta` 120 to 200, `cta_reason` 300 to 500, each after
+a live value landed exactly on the cap, once ending in a stray CJK character. The
+remaining caps were audited against the longest values observed and none is within
+10% of binding.
 | `research <research.json>` | the file does not match the expected shape | no keywords, no volume column anywhere, no competitors, fewer than 3 fetched, a competitor that failed, an existing page with no title or no meta description |
 | `keywords <keywords.json> <research.json> [suggested.txt]` | the file does not match the expected shape, a keyword absent from the research and from your suggestions, the primary keyword repeated as a secondary, a superlative in the rationale the figures contradict | no questions, fewer than 2 must-cover subtopics, research figures repeated in the reasoning, a live page whose title does not contain the chosen keyword |
 | `draft <draft.md> <outline.md> <brief.json> [percent]` (`draft` for `draft.md`) | H1/H2 differ from the outline, outline guidance lines left in, numbers absent from the facts and the outline | length outside ±15%, CTA missing from Conclusion, a keyword used more than twice, bolded keywords, numbers not in the facts or outline, sentences with absolute wording (all, every, guaranteed…) |

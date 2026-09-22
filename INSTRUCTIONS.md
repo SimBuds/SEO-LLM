@@ -120,7 +120,7 @@ Editing a stage file is usually better than rerunning it, because a rerun is a f
    - Each call sees the audience, tone, facts and all outline headings.
    - The script puts the outline's heading wording back and removes bold.
    - **`check.sh section`** runs next: exact headings, no leftover outline notes, word budget, and the call to action in the Conclusion.
-   - A failed part is retried with seed 2. If it fails again, it's saved as `.ERROR.md` and the run stops.
+   - A failed part is retried at the next two seeds (`DRAFT_SEED` sets the first). A third failure saves it as `.ERROR.md` and stops the run, and `p` at the menu redoes one part at a seed you pick.
 6. **Fact-check pass** (`prompts/verify.md`, temperature 0.1, 1,500-token limit, 120-second timeout):
    - The call lists sentences that invent a detail, overstate a fact, or contradict one, each with a replacement.
    - A replacement is swapped in word for word only if the original sentence is found and it doesn't touch the call to action.
