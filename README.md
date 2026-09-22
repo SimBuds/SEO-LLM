@@ -183,7 +183,7 @@ router: serving qwen
   brief stages work from the same sentence.
 - **The content type is asked once per page**, before the keyword choice, and
   saved to `research/<slug>/type.txt`. Three are built, each shaping the keyword
-  choice and the brief's sections: `review` for one product you have used,
+  choice, the page's title and the brief's sections: `review` for one product you have used,
   `roundup` for several you have tested and will supply as facts, and `guide` for
   a page that teaches the choice and names no product. Pressing enter records an
   empty answer, which keeps the generic behaviour and stops the question being
@@ -526,6 +526,7 @@ The edit is checked against its input with `check.sh rewrite`: identical heading
 | `section <part.md> <block.md or -> <words> <brief.json>` | headings differ from the block (or any heading in the intro), guidance lines or code fence left in, CTA missing from the conclusion, more than 140% of the word budget | words outside 60 to 125% of the budget, bolded keyword |
 | `rewrite <new.md> <old.md> <brief.json>` | headings changed, length outside 50 to 120%, CTA added where there was none, numbers absent from the input and facts, more absolute-wording sentences, CTA sentence lost, a keyword used more often than the draft used it | bold left in |
 | `targets <targets-stage.json> <research.json>` | the call to action names a brand or business absent from the research | |
+| `truncated <data.json> <schema.json>` | a string sitting exactly on its schema `maxLength`, meaning the reply was cut off mid-word | |
 | `research <research.json>` | the file does not match the expected shape | no keywords, no volume column anywhere, no competitors, fewer than 3 fetched, a competitor that failed, an existing page with no title or no meta description |
 | `keywords <keywords.json> <research.json> [suggested.txt]` | the file does not match the expected shape, a keyword absent from the research and from your suggestions, the primary keyword repeated as a secondary, a superlative in the rationale the figures contradict | no questions, fewer than 2 must-cover subtopics, research figures repeated in the reasoning, a live page whose title does not contain the chosen keyword |
 | `draft <draft.md> <outline.md> <brief.json> [percent]` (`draft` for `draft.md`) | H1/H2 differ from the outline, outline guidance lines left in, numbers absent from the facts and the outline | length outside ±15%, CTA missing from Conclusion, a keyword used more than twice, bolded keywords, numbers not in the facts or outline, sentences with absolute wording (all, every, guaranteed…) |

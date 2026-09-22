@@ -25,3 +25,8 @@ questions they will ask before paying.
 Everything else is unchanged. `source` still traces to the research, a section
 the research gives no basis for is left out rather than invented, and the
 business's own specifics come only from the facts stage.
+
+**The `topic` is the page's title, and it may not promise a recommendation.**
+Name what the reader will be able to decide ("How to choose a cat water
+fountain"), never "Best", "Top picks" or "Our picks", which commit the page to
+naming products it has none of.

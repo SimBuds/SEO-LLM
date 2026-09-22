@@ -31,3 +31,8 @@ and is prohibited.
 Keep `source` tracing to the research exactly as the rules below require. A
 section of the spine that the research gives no basis for is left out rather
 than invented.
+
+**The `topic` is the page's title, and it names the reviewed product**, in the
+plainest form the research uses for it. It may say that this is a review. It may
+not state a verdict, a score or a superlative, because you have not used the
+product.

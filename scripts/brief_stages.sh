@@ -157,11 +157,13 @@ run_stage() { # run_stage <index> <stage>
   fi
 
   bash "$HERE/fill_prompt.sh" "${fill[@]}" > "$prompt"
-  # Only the structure stage is type-aware so far: it decides what the sections
-  # are, which is the whole difference between a review and an article. The block
-  # is appended to the filled prompt rather than filled into the template, so a
-  # run with no type produces a byte-identical prompt to before this flag existed.
-  if [[ "$stage" == structure && -n "$RECORDED_TYPE" ]]; then
+  # The intent and structure stages are type-aware: one names the page and the
+  # other decides its sections, and those are the two answers a content type
+  # changes. A guide titled "Best ... Top Picks" over criteria sections is what
+  # happens when only the second one knows (measured 2026-09-22). The block is
+  # appended to the filled prompt rather than filled into the template, so a run
+  # with no type produces a byte-identical prompt to before this flag existed.
+  if [[ ( "$stage" == structure || "$stage" == intent ) && -n "$RECORDED_TYPE" ]]; then
     local recorded type_file
     recorded="$RECORDED_TYPE"
     type_file="prompts/brief-type-$recorded.md"
@@ -187,6 +189,10 @@ run_stage() { # run_stage <index> <stage>
       if [[ "$stage" == targets ]]; then
         bash "$HERE/check.sh" targets "$out" "$RESEARCH" || true
       fi
+      # A maxLength in the schema truncates rather than rejects, so a field that
+      # lands exactly on its cap was cut mid-word. The schema is already beside
+      # the data for this stage.
+      bash "$HERE/check.sh" truncated "$out" "${out%.json}.schema.json" || true
       return 0
     fi
     echo "stage $stage: unusable reply at seed $seed" >&2

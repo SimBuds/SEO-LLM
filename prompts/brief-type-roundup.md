@@ -30,3 +30,7 @@ fabrication unless the author's facts say it.
 If the facts stage produced nothing, this page cannot honestly be a roundup.
 Say so in the section purposes rather than writing picks with nothing behind
 them.
+
+**The `topic` is the page's title, and it may promise the picks**, because the
+author's facts supply them. Name the category and the judgement ("Best cat water
+fountains for hard water"), never a specific product, which you do not know.

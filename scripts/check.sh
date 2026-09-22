@@ -14,12 +14,13 @@
 #                     grounding a term the research does not carry)
 #   check.sh stage    <structure-stage.json> <research.json> <keywords.json>
 #   check.sh targets  <targets-stage.json> <research.json>
+#   check.sh truncated <data.json> <schema.json>
 # Prints "FAIL: ..." for problems that must be fixed or regenerated and
 # "WARN: ..." for problems a human should look at. Exits 1 on any FAIL, else 0.
 
 set -euo pipefail
 
-MODE="${1:?mode required: brief|outline|section|draft|rewrite|research|keywords|stage|targets}"; shift
+MODE="${1:?mode required: brief|outline|section|draft|rewrite|research|keywords|stage|targets|truncated}"; shift
 FAILS=0
 fail() { echo "FAIL: $*"; FAILS=$((FAILS + 1)); }
 warn() { echo "WARN: $*"; }
@@ -483,6 +484,42 @@ targets)
     grep -qiF "$name" <<< "$HAYSTACK" \
       || fail "the call to action names something the research does not contain: $name"
   done <<< "$NAMES"
+  ;;
+
+truncated)
+  # A JSON-schema maxLength truncates the reply rather than rejecting it, so a
+  # capped field arrives cut mid-word and nothing downstream can tell. Measured
+  # this session: rationale cut at 500 twice, and cta cut in 3 of 5 seeds in an
+  # earlier phase, once into a mangled fragment. A value sitting exactly on its
+  # cap is that cut, near enough always.
+  DATA="${1:?json file required}"; SCHEMA="${2:?schema file required}"
+  [[ -r "$DATA" ]] || { echo "not readable: $DATA" >&2; exit 2; }
+  [[ -r "$SCHEMA" ]] || { echo "not readable: $SCHEMA" >&2; exit 2; }
+  # Every capped string in the schema, as a jq path plus its cap. Array items
+  # are walked too, so a heading inside sections[] is reached.
+  while IFS=$'\t' read -r path cap; do
+    [[ -n "$path" ]] || continue
+    while IFS= read -r value; do
+      [[ -n "$value" ]] || continue
+      (( ${#value} == cap )) || continue
+      fail "$path is exactly its $cap-character limit, so the model's answer was cut off: ...${value: -40}"
+    done < <(jq -r --arg p "$path" '
+      def walk_path($segs):
+        if ($segs | length) == 0 then (if type == "string" then . else empty end)
+        elif $segs[0] == "[]" then (if type == "array" then .[] | walk_path($segs[1:]) else empty end)
+        else (if type == "object" and has($segs[0]) then .[$segs[0]] | walk_path($segs[1:]) else empty end)
+        end;
+      walk_path($p | split("."))' "$DATA")
+  done < <(jq -r '
+    def caps($prefix):
+      if .type == "object" and (.properties // {} | length) > 0 then
+        (.properties | to_entries[] | .key as $k | .value | caps(if $prefix == "" then $k else $prefix + "." + $k end))
+      elif .type == "array" and (.items // null | type) == "object" then
+        (.items | caps($prefix + ".[]"))
+      elif .type == "string" and (.maxLength // null) != null then
+        "\($prefix)\t\(.maxLength)"
+      else empty end;
+    caps("")' "$SCHEMA")
   ;;
 
 *) echo "unknown mode: $MODE" >&2; exit 2 ;;
