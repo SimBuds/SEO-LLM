@@ -182,9 +182,13 @@ router: serving qwen
   `research/<slug>/brief-stages/purpose.txt`, so the keyword choice and all four
   brief stages work from the same sentence.
 - **The content type is asked once per page**, before the keyword choice, and
-  saved to `research/<slug>/type.txt`. Answering `review` shapes the keyword
-  choice and the brief's sections. Pressing enter records an empty answer, which
-  keeps the generic behaviour and stops the question being asked again.
+  saved to `research/<slug>/type.txt`. Three are built, each shaping the keyword
+  choice and the brief's sections: `review` for one product you have used,
+  `roundup` for several you have tested and will supply as facts, and `guide` for
+  a page that teaches the choice and names no product. Pressing enter records an
+  empty answer, which keeps the generic behaviour and stops the question being
+  asked again. A type's guidance is appended to the filled prompt rather than
+  templated into it, so an untyped page produces the prompt it always did.
 - **Nothing needs a hand edit.** Every value the pipeline cannot derive is asked
   for: the page purpose, the content type, your keyword suggestions, the facts
   the page may state, the primary keyword to confirm or swap, and the word count.

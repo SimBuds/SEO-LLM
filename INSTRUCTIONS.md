@@ -72,6 +72,8 @@ One model call at temperature 0.2 against `research.json`, one line from you abo
 
 Four stages, one model call each, and each stage sees the ones before it. From the menu one press runs every stage that is still missing and stops once at the end with all four to read. `/seo-brief` in Claude Code still walks them one at a time.
 
+The content type shapes stages 1 and 2. `review` is one product you have used, `roundup` is several you have tested and supply as facts, `guide` teaches the choice and names no product, and an empty answer is a general article.
+
 1. **intent:** topic, audience, reader goal, tone, each with its reason.
 2. **structure:** the sections this page needs, each tagged with where it came from, plus the FAQ questions and the gaps in the ranking pages.
 3. **targets:** the brief's keywords and the call to action.

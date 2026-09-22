@@ -295,12 +295,16 @@ need_type() { # sets TYPE, asking once and reusing it afterwards
     TYPE=$(tr -d '[:space:]' < "$f")
     return 0
   fi
-  say "What kind of page is this? Enter 'review' for one product you have used,"
-  say "or press enter for a general article."
+  say "What kind of page is this?"
+  say "  review   one product you have used"
+  say "  roundup  several products you have tested, and you will supply them as facts"
+  say "  guide    how to choose, naming no product"
+  say "  (enter)  a general article"
   read -r -p "Type: " TYPE
   TYPE="${TYPE//[[:space:]]/}"
+  TYPE="${TYPE,,}"
   if [[ -n "$TYPE" && ! -r "$ROOT/prompts/brief-type-$TYPE.md" ]]; then
-    err "unknown content type: $TYPE (accepted: review, or empty for a general article)"
+    err "unknown content type: $TYPE (accepted: review, roundup, guide, or empty for a general article)"
     return 1
   fi
   mkdir -p "$(dirname "$f")"
@@ -380,7 +384,8 @@ need_facts() { # writes the facts source, asking once
       printf '%s\n' "${lines[@]}" > "$f"
       say "recorded ${#lines[@]} fact(s) in $f"
     else
-      say "kept as a general guide: no section should promise specific products."
+      say "kept as a general guide. If you have not chosen a type yet, 'guide' keeps"
+      say "every section on criteria rather than picks."
     fi
   fi
   return 0
