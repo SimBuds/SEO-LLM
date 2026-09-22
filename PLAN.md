@@ -342,6 +342,65 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - `./seo` asks whether the page is already live, then which page it is, then for whatever is missing: the live URL or your site's URL, the keyword export paths (copied into `inputs/`), and the competitor URLs. A page that already has them is asked nothing, and every question takes a blank answer.
 - An export path that is not readable is refused by name and asked again, rather than skipped quietly, per the honest-checks rule in AGENTS.md.
 
+### Phase 39: The tracked docs describe the launcher, the intake and the suggestions (done 2026-09-21)
+- Files: `README.md`, `INSTRUCTIONS.md`, `PLAN.md`, two skill files.
+- Every stale claim found while reading was corrected, including "the four commands" in the quickstart and "Phase 11 adds those keys" in two files when the merge already writes them.
+
+### Phase 40: Any size of keyword export parses, and the list is capped (done 2026-09-21)
+- Files: `scripts/research_collect.sh`, `scripts/check.sh`, `README.md`, `INSTRUCTIONS.md`.
+- The parsed export travels to `jq` through a file, not an argument: Linux caps one argv string at 128 KB whatever `ARG_MAX` says, so a 432 KB export died with "Argument list too long".
+- `MAX_KEYWORDS` (150) caps what reaches `research.json`, because 2782 rows would not fit the keyword prompt's 32768-token context. `keywords_total` and `keywords_cutoff` record the cut. An unreadable export exits 4 and writes nothing.
+
+### Phase 41: The brief stages run in one press (done 2026-09-21)
+- Files: `scripts/seo.sh`, `README.md`, `INSTRUCTIONS.md`.
+- The loop advances only when a stage really lands on disk, so a call that exits 0 without writing stops it rather than repeating.
+
+### Phases 42 to 45: What a full audit of a live run found (done 2026-09-21)
+- Files: `scripts/research_collect.sh`, `scripts/check.sh`, `scripts/seo.sh`, `README.md`.
+- Competitor page furniture ("About", "Help", "One Comment") is dropped at collect time, because those headings sit in the haystack `check.sh stage` traces sections against. Measured: 6 of 16 headings on one run.
+- A rationale claiming "the highest volume" about the chosen term is checked against the figures and FAILs when false. A live run justified a 600-volume term that way while the file held one at 3400.
+- An empty `facts` list against a picks-shaped heading WARNs at the brief and the outline, because that combination produced three subsections naming no product.
+- The review stage says the fact checker had nothing to compare against instead of reporting a clean pass.
+
+### Phases 46 to 50: Rewrite and draft integrity (done 2026-09-21)
+- Files: `scripts/check.sh`, `scripts/lib_parts.sh`, `scripts/brief_stages.sh`, `prompts/rewrite.md`, `README.md`, `INSTRUCTIONS.md`.
+- The rewrite may not use a keyword more often than the draft did: a live pass had taken the primary from 5 uses to 9.
+- `check.sh targets` grounds the brands a call to action names against the research, run inline by `brief_stages.sh`.
+- `draft_factor` fell from 135 to 120 after two runs measured the rewrite cutting 13% and 17.5%, not the assumed 20 to 35%, and a part over 140% of its budget now fails and regenerates.
+- A number absent from the facts and the outline FAILs the draft instead of warning. "Less than 30 decibels" had shipped through draft, rewrite and review.
+- **The rewrite prompt no longer receives the keyword list.** Measured across seeds: with it, 3 of 3 added keyword uses to one section; without it, 0 of 3, and the article landed inside its word band for the first time.
+
+### Phase 51: The skills state what Claude Code has to judge (done 2026-09-21)
+- Files: the `seo-keywords`, `seo-brief` and `seo-draft` skills, `README.md`.
+- Written after design principle 3 was set: a rule arithmetic can settle belongs in `check.sh`, a judgement that needs reading belongs to the auditor. Each skill now names its own.
+
+### Phases 52 to 54: The pipeline asks instead of expecting a hand edit (done 2026-09-21)
+- Files: `scripts/seo.sh`, `scripts/brief_stages.sh`, `README.md`, `INSTRUCTIONS.md`.
+- The facts a page may state are typed at the menu into the file `/seo-ingest` writes, so a document is no longer the only way to supply them. Fixing that exposed that `brief_stages.sh` never passed `--source`, so the facts stage had always failed when a source existed.
+- The word count is offered at the merge with the competitor median as its default, and a page recording no facts is asked whether it recommends products.
+- The keyword choice is confirmed at the menu: accept, swap for another researched term, or reseed, with the swap re-running the same check.
+
+### Phase 55: guide and roundup join review as content types (done 2026-09-21)
+- Files: four new `prompts/*-type-{guide,roundup}.md`, `scripts/seo.sh`, `README.md`, `INSTRUCTIONS.md`.
+- Both were already in the `content_type` enums; only the prompt files were missing. `guide` produced criteria sections and no picks heading; `roundup` produced a picks spine whose purposes instruct the author to name the products.
+
+### Phases 56 and 57: Redoing work without editing files (done 2026-09-22)
+- Files: `scripts/draft_sections.sh`, `scripts/seo.sh`, `scripts/brief_stages.sh`, `README.md`, `INSTRUCTIONS.md`.
+- `p` redoes one drafted part at a fresh seed (`DRAFT_SEED`), leaving the rest alone. Found and fixed while testing: the staleness test discarded every part when a part and the outline shared a timestamp to the second.
+- `e` changes a recorded answer, says what it invalidates, and clears what was built on it. Changing the content type clears the brief stages, which `brief_stages.sh` requires.
+
+### Phase 58: A keyword's market is part of its identity (done 2026-09-22)
+- Files: `scripts/research_collect.sh`, `scripts/check.sh`, `README.md`.
+- `Country` is read and rows merge by keyword and market, so a Canadian and a US export of one term stay two rows. Merged on the keyword alone, one volume silently won, and the keyword prompt's Case B is entirely a comparison of volumes.
+
+### Phase 59: A field cut off by its schema cap is reported (done 2026-09-22)
+- Files: `scripts/check.sh`, `scripts/brief_stages.sh`, `README.md`.
+- A `maxLength` truncates rather than rejects. `check.sh truncated` walks a schema for capped strings and FAILs on a value sitting exactly on its cap. It caught the live `keywords.json` rationale at exactly 500 characters.
+
+### Phase 60: The content type reaches the intent stage (done 2026-09-22)
+- Files: `scripts/brief_stages.sh`, the three `brief-type-*.md`, `README.md`.
+- A guide-typed brief had come out titled "Best Cat Water Fountains: Top Picks" over criteria sections, because only the structure stage knew the type. Each type now states what its `topic` may promise.
+
 ### Phase 15: Docs + SEO knowledge base
 - Files: `README.md`, `docs/google/{helpful-content,eeat,semantic-search,ai-content-guidelines}.md`, link from system prompt.
 - Goal: prompts ground in EEAT / helpful-content guidance, and the quickstart is documented.

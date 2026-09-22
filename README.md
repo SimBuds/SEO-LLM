@@ -241,6 +241,14 @@ router: serving qwen
   the brief stages, because `brief_stages.sh` refuses a type that disagrees with
   the stages already written, and a brief half-shaped as one thing and half as
   another is worse than either.
+- **A figure the facts cannot support can be accepted rather than argued with.**
+  `n` lists every number in the article that is in neither the facts nor the
+  outline, with the sentence around it, and takes the ones you vouch for into
+  `briefs/_ingest/<slug>.txt` before redoing the facts stage and the merge. On a
+  procedural page this is the normal case: "soak removable parts for about 15 to
+  20 minutes" is domain knowledge the author has, not a business specific a
+  document would carry, and without it the page cannot pass its own number check.
+  Decline and the figure stays flagged, for you to rewrite or cut.
 - **One drafted part can be redone on its own.** With a draft on disk the menu
   offers `p`: it lists the parts with their word counts, takes a number and a
   seed (3 by default, because the same seed returns the same text), deletes that

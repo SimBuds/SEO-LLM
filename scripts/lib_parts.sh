@@ -10,6 +10,11 @@
 # the phantom sentence "com in all samples." (found in the 2026-09-20 QA run).
 ABSOLUTE_SENTENCE='(^|[[:space:]])([^.!?]|\.[^[:space:]])*\b(all|every|always|never|guarantee[sd]?|any circumstances|complete control|entirely|without compromise)\b([^.!?]|\.[^[:space:]])*[.!?]'
 
+# Numbers as written (4-6, 2.5, $2,500, 9.25), normalized: commas and
+# trailing dots dropped so "$2,500." and "2500" compare equal.
+# Ordered-list markers ("1. ") are dropped first: they are not claims.
+numbers() { sed -E 's/^[[:space:]]*[0-9]+\.[[:space:]]//' | grep -oE '[0-9][0-9,.]*' | sed -E 's/,//g; s/\.+$//' | sort -u || true; }
+
 # draft_factor <word_count>: how far above word_count the draft aims, in
 # percent. A lower factor for short pages was tried and left a thin-facts
 # 1000-word page 28% short, so one factor applies to every length and an
@@ -51,17 +56,30 @@ unbold() {
 # the repair is deterministic: keep headings, blank lines and the two guidance
 # slots under an H2, drop the rest, and say what was dropped. Returns 0 always;
 # whether the result is a valid outline stays check.sh's decision.
+# An H3 under the Conclusion is dropped as well: check.sh already says the
+# Conclusion should have none, prompts/conclusion.md does not write one, and the
+# drafter then fails the part twice on "headings differ from the outline block"
+# and stops the whole run. Seen 2026-09-22 on "### Measure Your Space and Observe
+# Your Cat".
 clean_outline() {
   local f=$1 removed
   removed=$(awk '
-    /^#{1,6} / { slot = ($0 ~ /^## /) ? 2 : 0; next }
+    /^## / { concl = ($0 ~ /^## Conclusion[[:space:]]*$/); slot = 2; next }
+    /^#{1,6} / {
+      if (concl && $0 ~ /^### /) { printf "  %d: %s\n", FNR, substr($0, 1, 90); next }
+      slot = 0; next
+    }
     /^[[:space:]]*$/ { next }
     /^(_Intent:|Keywords:)/ { if (slot > 0) { slot--; next } }
     { printf "  %d: %s\n", FNR, substr($0, 1, 90) }
   ' "$f")
   [[ -z "$removed" ]] && return 0
   awk '
-    /^#{1,6} / { slot = ($0 ~ /^## /) ? 2 : 0; print; next }
+    /^## / { concl = ($0 ~ /^## Conclusion[[:space:]]*$/); slot = 2; print; next }
+    /^#{1,6} / {
+      if (concl && $0 ~ /^### /) { next }
+      slot = 0; print; next
+    }
     /^[[:space:]]*$/ { print; next }
     /^(_Intent:|Keywords:)/ { if (slot > 0) { slot--; print } ; next }
     { next }

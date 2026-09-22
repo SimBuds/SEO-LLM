@@ -151,6 +151,8 @@ Editing a stage file is usually better than rerunning it, because a rerun is a f
 
 ## The menu
 
+From the menu, `n` accepts a flagged figure into the facts and rebuilds the brief, `p` redoes one drafted part, and `e` changes a recorded answer.
+
 `./seo [slug]` runs the whole thing from one place (`scripts/seo.sh` is the script
 behind it, and still works when called directly). It reads each stage's state from
 the files on disk, so it always knows what is done, what is ready and what is

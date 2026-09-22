@@ -146,6 +146,19 @@ run_stage() { # run_stage <index> <stage>
     --set-file RESEARCH="$RESEARCH"
     --set-file KEYWORD_CHOICE="$KEYWORDS"
     --set PAGE_PURPOSE="$PURPOSE")
+  # The structure stage decides how many sections the page has, so it is the one
+  # stage that needs the length. Without it, it wrote one section per subtopic and
+  # the outline mirrored that: 7, 7, 8 and 9 sections against tables allowing 4-6
+  # and 3-5 (measured 2026-09-21 and 2026-09-22). The ceiling mirrors the table in
+  # prompts/outline.md.
+  if [[ "$stage" == structure ]]; then
+    local tw max
+    tw=$(target_words)
+    if   (( tw <= 1000 )); then max=3
+    elif (( tw <= 1800 )); then max=5
+    else max=6; fi
+    fill+=(--set "TARGET_WORDS=$tw" --set "MAX_SECTIONS=$max")
+  fi
   # prompts/brief-facts.md is the only template with {{SOURCE_TEXT}}, and it was
   # never passed: the stage worked only because a missing source returns early.
   # Found 2026-09-21, the first time a source document existed.
@@ -206,6 +219,13 @@ run_stage() { # run_stage <index> <stage>
 # number the research already implies should be auditable, not sampled.
 target_words() {
   local counts median
+  # A brief that already exists carries the length the human settled on, and a
+  # redo must not silently go back to the competitor median they overrode.
+  local existing="${BRIEFS_DIR:-briefs}/$SLUG.json"
+  if [[ -r "$existing" ]]; then
+    median=$(jq -r '.word_count // empty' "$existing")
+    if [[ "$median" =~ ^[0-9]+$ ]]; then echo "$median"; return 0; fi
+  fi
   counts=$(jq -r '.competitor_word_counts // [] | .[]' "$RESEARCH" | sort -n)
   if [[ -z "$counts" ]]; then
     echo "$DEFAULT_WORDS"

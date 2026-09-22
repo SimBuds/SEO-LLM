@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Fill a prompt template's {{PLACEHOLDERS}}.
 # Usage: fill_prompt.sh <template> [--brief brief.json] [--outline outline.md] [--source source.txt]
-#   --brief    fills TOPIC, BRIEF, AUDIENCE, TONE, WORD_COUNT, KEYWORDS, CTA, FACTS,
+#   --brief    fills TOPIC, BRIEF, AUDIENCE, TONE, WORD_COUNT, MIN_SECTIONS,
+#              MAX_SECTIONS, KEYWORDS, CTA, FACTS,
 #              and from the optional research keys SEARCH_INTENT, MUST_COVER,
 #              QUESTIONS, EXISTING_PAGE (each a stated placeholder when absent)
 #   --outline  fills OUTLINE
@@ -61,6 +62,12 @@ FILLED=$(jq -nrj --rawfile t "$TEMPLATE" --argjson b "$BRIEF_JSON" \
       AUDIENCE: $b.target_audience,
       TONE: $b.tone,
       WORD_COUNT: ($b.word_count | tostring),
+      # The section band the length allows, as two numbers rather than a table the
+      # model has to look the length up in. Mirrors the table in prompts/outline.md
+      # and the bands check.sh enforces. Measured: asked to read the table, the
+      # outline returned 7, 7, 8 and 9 sections where 4-6 and 3-5 were allowed.
+      MIN_SECTIONS: (if $b.word_count <= 1000 then "2" elif $b.word_count <= 1800 then "3" else "4" end),
+      MAX_SECTIONS: (if $b.word_count <= 1000 then "3" elif $b.word_count <= 1800 then "5" else "6" end),
       KEYWORDS: ($b.keywords | join(", ")),
       CTA: $b.cta,
       FACTS: (($b.facts // []) | if length == 0 then "(none provided)" else map("- " + .) | join("\n") end),
@@ -84,7 +91,8 @@ LEFT=$(grep -oE '\{\{[A-Z_]+\}\}' "$TEMPLATE" | sort -u | while read -r p; do
     "{{OUTLINE}}") [[ -n "$OUTLINE" ]] || echo "$p" ;;
     "{{SOURCE_TEXT}}") [[ -n "$SOURCE" ]] || echo "$p" ;;
     "{{TOPIC}}"|"{{BRIEF}}"|"{{AUDIENCE}}"|"{{TONE}}"|"{{WORD_COUNT}}"|"{{KEYWORDS}}"|"{{CTA}}"|"{{FACTS}}"|\
-    "{{SEARCH_INTENT}}"|"{{MUST_COVER}}"|"{{QUESTIONS}}"|"{{EXISTING_PAGE}}")
+    "{{SEARCH_INTENT}}"|"{{MUST_COVER}}"|"{{QUESTIONS}}"|"{{EXISTING_PAGE}}"|\
+    "{{MIN_SECTIONS}}"|"{{MAX_SECTIONS}}")
       [[ -n "$BRIEF" ]] || echo "$p" ;;
     *) jq -e --arg k "${p:2:${#p}-4}" 'has($k)' <<< "$EXTRA" > /dev/null || echo "$p" ;;
   esac

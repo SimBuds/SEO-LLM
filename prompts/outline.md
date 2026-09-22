@@ -34,11 +34,16 @@ Size the outline to the target length (the FAQ and Conclusion are not counted in
 
 Requirements:
 
-- Start with a single `# ` H1 title that is specific, search-intent-aligned, and not generic.
-- Follow with the topic `## ` H2 sections (count per the table) that together cover the topic with strong semantic breadth.
+- Start with a single `# ` H1 title that is specific, search-intent-aligned, and not generic. **It may not promise more than the brief delivers.** The topic above is what the page is; an H1 that says "Best", "Top picks" or "Our picks" commits the article to naming products, so write one only when the brief's facts name products it can recommend. With no such facts, title the page by what the reader will be able to decide.
+- Follow with **exactly {{MIN_SECTIONS}} to {{MAX_SECTIONS}} topic `## ` H2 sections** that together cover the topic with strong semantic breadth. That count is a hard limit, not a target: when the brief lists more subtopics than you have sections, group related ones into one section rather than adding a section.
 - Under each topic H2, include `### ` H3 subsections per the table, only where they add real structure (skip H3s when they would be filler).
 - Include one H2 named exactly `## FAQ` near the end with H3 questions (count per the table) phrased the way the audience would search them.
 - End with one H2 named exactly `## Conclusion`, with no H3s under it.
+- **No heading may be about a figure the brief cannot supply.** If the source facts
+  above are empty, no H2 or H3 may be about prices, running costs, decibel levels,
+  capacities or replacement intervals, because the drafter would have to invent
+  them. Write the criterion instead ("What filters do and how often they need
+  changing", not "Filter costs per year").
 - After each H2 line, add two lines that guide later drafting: `_Intent: <search intent in 6–12 words>._` and then `Keywords: <1–3 comma-separated keyword cues>`. Assign each primary keyword to at most two H2 sections so the draft does not repeat it everywhere; fill the other cue slots with related secondary terms.
 - Naturally distribute the primary keywords across the H1, H2s, and intent notes — no stuffing. Headings must read as natural English with normal capitalization: adapt a keyword with prepositions or word order ("Shipping Costs in Canada and the USA", not "Shipping Costs Canada USA"). Never paste a keyword in as a heading prefix.
 - **Cover every researched subtopic** listed above, as its own H2 or as an H3 under a related one, unless the list says none was researched. Use your own wording for the heading, not the subtopic verbatim.

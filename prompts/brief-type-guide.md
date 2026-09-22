@@ -30,3 +30,8 @@ business's own specifics come only from the facts stage.
 Name what the reader will be able to decide ("How to choose a cat water
 fountain"), never "Best", "Top picks" or "Our picks", which commit the page to
 naming products it has none of.
+
+**A guide with no facts teaches the decision, it does not price it.** Sections
+about what something costs, how loud it is or how long it lasts need figures the
+page does not have. Name what the reader should compare instead, and let them
+read the numbers off the product they are looking at.

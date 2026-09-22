@@ -50,16 +50,31 @@ rejected.
    A reworded or paraphrased source is treated as untraceable and the section is
    rejected, so copy rather than tidy. A section you cannot trace does not belong
    in the list.
-2. **Order the sections the way a reader needs them**, not the way the research
+2. **The page is about {{TARGET_WORDS}} words, so propose at most
+   {{MAX_SECTIONS}} sections.** That ceiling is not negotiable and it outranks
+   covering every subtopic separately: when the research offers more subtopics
+   than you have sections, group the related ones into one section and say so in
+   its `purpose` ("covers the pump, the filter and the tubing"). A section that
+   would get under 150 words is not a section.
+3. **Order the sections the way a reader needs them**, not the way the research
    lists them. A definition comes before a comparison, a process before its edge
    cases.
-3. **`faq_questions` come from the research's questions.** Return an empty list
+4. **`faq_questions` come from the research's questions.** Return an empty list
    rather than inventing any. Never repeat a section heading as a question.
-4. **`gaps` are about the competitor pages**, and each one must be something the
+5. **`gaps` are about the competitor pages**, and each one must be something the
    research shows: a subtopic none of them covers, a format that fits the
    searcher better, or an audience they write past. Do not guess at their
    quality.
-5. **No business specifics, no numbers, no claims about the company.** Those come
+6. **No section may be about a figure this page cannot supply.** A heading whose
+   subject is a price, a running cost, a decibel level, a capacity, a wattage or a
+   replacement interval commits the article to stating numbers. Propose one only
+   when the research above actually carries that kind of figure for this topic.
+   Otherwise name the criterion instead: "Filter requirements and replacement
+   costs" becomes "What filters do and how often they need changing", which a
+   writer can answer without inventing a price. Measured 2026-09-22: a costs
+   section with no cost data in the research produced invented prices at three
+   seeds out of three.
+7. **No business specifics, no numbers, no claims about the company.** Those come
    from a later stage.
-6. Copy every key name character for character, and output no prose outside the
+8. Copy every key name character for character, and output no prose outside the
    JSON object.

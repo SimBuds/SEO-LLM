@@ -123,6 +123,9 @@ stage_status() { # stage_status <stage-id>; sets STATE and DETAIL
       if [[ -r "$OUTPUTS/$SLUG/outline.md" ]]; then
         STATE="done"
         DETAIL="$(grep -c '^## ' "$OUTPUTS/$SLUG/outline.md" 2>/dev/null) H2 sections"
+        if [[ "$BRIEFS/$SLUG.json" -nt "$OUTPUTS/$SLUG/outline.md" ]]; then
+          STATE="stale"; DETAIL="the brief changed after this was written"
+        fi
       elif [[ -r "$BRIEFS/$SLUG.json" ]]; then
         STATE="ready"
       else
@@ -132,6 +135,9 @@ stage_status() { # stage_status <stage-id>; sets STATE and DETAIL
     draft)
       if [[ -r "$OUTPUTS/$SLUG/draft.md" ]]; then
         STATE="done"; DETAIL="$(wc -w < "$OUTPUTS/$SLUG/draft.md" | tr -d ' ') words"
+        if [[ "$OUTPUTS/$SLUG/outline.md" -nt "$OUTPUTS/$SLUG/draft.md" ]]; then
+          STATE="stale"; DETAIL="the outline changed after this was drafted"
+        fi
       elif [[ -r "$OUTPUTS/$SLUG/outline.md" ]]; then
         STATE="ready"
       else
@@ -141,6 +147,9 @@ stage_status() { # stage_status <stage-id>; sets STATE and DETAIL
     rewrite)
       if [[ -r "$OUTPUTS/$SLUG/final.md" ]]; then
         STATE="done"; DETAIL="$(wc -w < "$OUTPUTS/$SLUG/final.md" | tr -d ' ') words"
+        if [[ "$OUTPUTS/$SLUG/draft.md" -nt "$OUTPUTS/$SLUG/final.md" ]]; then
+          STATE="stale"; DETAIL="the draft changed after this was edited"
+        fi
       elif [[ -r "$OUTPUTS/$SLUG/draft.md" ]]; then
         STATE="ready"
       else
@@ -150,6 +159,8 @@ stage_status() { # stage_status <stage-id>; sets STATE and DETAIL
     review)
       if [[ -r "$OUTPUTS/$SLUG/final.md" ]]; then
         STATE="ready"
+        [[ "$OUTPUTS/$SLUG/draft.md" -nt "$OUTPUTS/$SLUG/final.md" ]] \
+          && DETAIL="final.md is older than the draft, so this reviews a superseded article"
       else
         DETAIL="needs final.md"
       fi
@@ -199,6 +210,7 @@ render_menu() {
     local mark="" colour="$DIM"
     case "$STATE" in
       done)  colour="$GREEN" ;;
+      stale) colour="$YELLOW"; [[ -z "$next" ]] && { next="$i"; mark="  <- next"; } ;;
       ready) colour="$RESET"; [[ -z "$next" ]] && { next="$i"; mark="  <- next"; } ;;
     esac
     printf '  %s%d [%-7s] %-18s %s%s%s\n' "$colour" "$i" "$STATE" "$label" "$DETAIL" "$mark" "$RESET"
@@ -208,6 +220,7 @@ render_menu() {
     "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET"
   [[ -d "$OUTPUTS/$SLUG/sections" ]] && printf '   %sp%s redo one drafted part' "$BOLD" "$RESET"
   [[ -n "$(revise_targets)" ]] && printf '   %se%s change a recorded answer' "$BOLD" "$RESET"
+  [[ -r "$OUTPUTS/$SLUG/draft.md" ]] && printf '   %sn%s accept flagged numbers' "$BOLD" "$RESET"
   printf '\n' 
   if [[ "$BRIEF_ONLY" == 1 ]]; then
     printf '  %sbrief-only mode: the outline, draft and rewrite stages are hidden. Unset SEO_BRIEF_ONLY for all nine.%s\n' "$DIM" "$RESET"
@@ -701,6 +714,61 @@ action_rewrite() {
   run_check draft "$out/final.md" "$out/outline.md" "$BRIEFS/$SLUG.json"
 }
 
+# A figure the facts cannot support fails the draft, and on a procedural page the
+# figure is usually real: a soak time, a ratio, an interval. It is the author's to
+# vouch for, not the model's to invent, so this offers each flagged sentence and
+# writes the accepted ones into the facts source the facts stage reads.
+action_accept_numbers() {
+  local out="$OUTPUTS/$SLUG" brief="$BRIEFS/$SLUG.json" src
+  src="$out/final.md"; [[ -r "$src" ]] || src="$out/draft.md"
+  [[ -r "$src" && -r "$brief" && -r "$out/outline.md" ]] || {
+    warn "this needs a brief, an outline and a draft."; return 0; }
+  local known unknown
+  # Built exactly as check.sh draft builds it, so the two cannot disagree.
+  known=$( { jq -r '.facts[], .word_count' "$brief"; cat "$out/outline.md"; } | numbers)
+  mapfile -t unknown < <(numbers < "$src" | grep -vxF -f <(printf '%s\n' "$known") || true)
+  (( ${#unknown[@]} )) || { say "no flagged figures: every number in the article is in the facts or the outline."; return 0; }
+  say ""
+  say "${BOLD}Figures in the article that the facts do not support${RESET}"
+  say "Accept a sentence and it becomes a fact this page may state. Decline and it"
+  say "stays flagged, for you to rewrite or remove."
+  # The sentences are collected before anything is asked: a read inside a loop fed
+  # by a process substitution takes its answer from that stream, not the terminal.
+  local -a candidates=() accepted=()
+  local n line seen
+  seen=$(mktemp); trap 'rm -f "$seen"' RETURN
+  for n in "${unknown[@]}"; do
+    while IFS= read -r line; do
+      [[ -n "${line// /}" ]] || continue
+      grep -qxF "$line" "$seen" && continue
+      printf '%s\n' "$line" >> "$seen"
+      candidates+=("$line")
+    done < <(sed 's/\([.!?]\) /\1\n/g' "$src" | grep -F "$n" | head -3)
+  done
+  local yn
+  for line in "${candidates[@]}"; do
+    say ""
+    say "  $line"
+    read -r -p "  Accept as a fact? [y/N] " yn
+    [[ "$yn" == [yY]* ]] && accepted+=("$line")
+  done
+  (( ${#accepted[@]} )) || { say ""; say "nothing accepted, so nothing was written."; return 0; }
+  local f; f=$(facts_file)
+  mkdir -p "$(dirname "$f")"
+  printf '%s\n' "${accepted[@]}" >> "$f"
+  say ""
+  say "added ${#accepted[@]} line(s) to $f"
+  read -r -p "Redo the facts stage and rebuild the brief now? [Y/n] " yn
+  [[ "$yn" == [nN]* ]] && { say "kept; the lines are there for the next facts run."; return 0; }
+  need_purpose || return 1
+  local -a targs=(); [[ -n "${TYPE:-}" ]] && targs=(--type "$TYPE")
+  bash "$ROOT/scripts/brief_stages.sh" "$SLUG" --purpose "$PURPOSE" "${targs[@]}" --redo facts || {
+    err "the facts stage failed, see the message above."; return 1; }
+  bash "$ROOT/scripts/brief_stages.sh" "$SLUG" --merge --force || {
+    err "the merge failed, see the message above."; return 1; }
+  run_check draft "$src" "$out/outline.md" "$brief"
+}
+
 action_review() {
   local out="$OUTPUTS/$SLUG" rejected
   say ""
@@ -1007,6 +1075,7 @@ while true; do
     a|A) run_all; read -r -p "Press enter for the menu. " _ ;;
     p|P) action_redo_part; read -r -p "Press enter for the menu. " _ ;;
     e|E) action_revise; read -r -p "Press enter for the menu. " _ ;;
+    n|N) action_accept_numbers; read -r -p "Press enter for the menu. " _ ;;
     "")  ;;
     [1-9])
       idx=$((choice - 1))

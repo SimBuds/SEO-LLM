@@ -25,13 +25,21 @@ FAILS=0
 fail() { echo "FAIL: $*"; FAILS=$((FAILS + 1)); }
 warn() { echo "WARN: $*"; }
 
-# Numbers as written (4-6, 2.5, $2,500, 9.25), normalized: commas and
-# trailing dots dropped so "$2,500." and "2500" compare equal.
-# Ordered-list markers ("1. ") are dropped first: they are not claims.
-numbers() { sed -E 's/^[[:space:]]*[0-9]+\.[[:space:]]//' | grep -oE '[0-9][0-9,.]*' | sed -E 's/,//g; s/\.+$//' | sort -u || true; }
-
 source "$(dirname "${BASH_SOURCE[0]}")/lib_parts.sh"
-absolutes() { grep -v '^#' "$1" | grep -oiE "$ABSOLUTE_SENTENCE" || true; }
+# Two classes of match are not overclaims and made this warning fire on 3 of 3
+# runs of a correct article (measured 2026-09-22): a temporal "every week" or
+# "every one to two months", which is a frequency rather than a universal, and an
+# instruction to the reader, which opens with its verb ("Always unplug...",
+# "Disassemble the unit and wash all removable parts"). Both are dropped here
+# rather than by weakening the pattern, because the pattern is still right about
+# a claim: "Every screw is an opportunity for mold" still warns.
+ABSOLUTE_TEMPORAL='\bevery[[:space:]]+([a-z0-9-]+[[:space:]]+(to[[:space:]]+[a-z0-9-]+[[:space:]]+)?)?(second|minute|hour|day|week|month|year|time)s?\b'
+ABSOLUTE_IMPERATIVE='^[[:space:]]*(always|never|rinse|ensure|unplug|remove|detach|soak|replace|check|look|disassemble|wash|dry|clean|fill|place|avoid|use|keep|perform|run|store|position|refill|empty|scrub|wipe|make sure|do not|don.t)\b'
+absolutes() {
+  grep -v '^#' "$1" | grep -oiE "$ABSOLUTE_SENTENCE" \
+    | grep -viE "$ABSOLUTE_TEMPORAL" \
+    | grep -viE "$ABSOLUTE_IMPERATIVE" || true
+}
 
 # A heading that promises specific products. With an empty facts list the draft
 # has nothing to recommend from, and the prompts correctly refuse to invent a
@@ -75,7 +83,13 @@ brief_valid() {
 # produces "toronto" in running text.
 proper_noun_keywords() {
   local prose caps lower k w
-  prose=$(jq -r '[.topic, .target_audience, .cta, .facts[]] | join(" ")' "$1")
+  # The topic is excluded on purpose: it is Title Case by convention, so every
+  # word in it looks capitalised and every ordinary keyword then looks like a
+  # lowercased brand. On a how-to page titled "How to Clean Cat Water Fountain"
+  # that fired on 4 of 5 keywords, in the headings check and the verbatim check
+  # both (measured 2026-09-22). A real brand appears in the audience, the CTA or
+  # the facts, which are ordinary sentences.
+  prose=$(jq -r '[.target_audience, .cta, .facts[]] | join(" ")' "$1")
   caps=$(grep -oE '\b[A-Z][a-z]+\b' <<< "$prose" | sort -u || true)
   lower=$(grep -oE '\b[a-z]+\b' <<< "$prose" | sort -u || true)
   jq -r '.keywords[]' "$1" | while read -r k; do
@@ -124,7 +138,11 @@ outline)
   STRAY=$(grep -nvE '^(#{1,3} .+|_Intent: .+_|Keywords: .+|)$' "$OUTLINE" || true)
   [[ -z "$STRAY" ]] || fail "body text in outline (only headings, _Intent:_ and Keywords: lines allowed):"$'\n'"$(head -5 <<< "$STRAY")"
   if (( $(jq '.facts | length' "$BRIEF") == 0 )); then
-    PROMISES=$(grep '^#\{1,3\} ' "$OUTLINE" | picks_headings | sed 's/^#* //' | paste -sd'|' | sed 's/|/; /g')
+    # The hashes come off before matching, not after: the picks pattern anchors on
+    # the start of the heading text, so "# Best ..." never matched while the "# "
+    # was still in front of it. Third defect in this pattern, which is the case for
+    # keeping the judgement with the auditor and this only as a prompt to look.
+    PROMISES=$(grep '^#\{1,3\} ' "$OUTLINE" | sed 's/^#* //' | picks_headings | paste -sd'|' | sed 's/|/; /g')
     [[ -z "$PROMISES" ]] || warn "the brief has no facts but these headings promise product picks, so they will name no product: $PROMISES"
   fi
   H2=$(grep -c '^## ' "$OUTLINE" || true); INTENT=$(grep -c '^_Intent: ' "$OUTLINE" || true)
@@ -143,8 +161,11 @@ outline)
     | while read -r l; do warn "more than $H3MAX H3s for $WC words: $l"; done
   CONC_H3=$(awk '/^## /{f=($0=="## Conclusion")} f && /^### /' "$OUTLINE" | wc -l)
   (( CONC_H3 == 0 )) || warn "Conclusion has $CONC_H3 H3s; it should have none"
+  # The H1 and the FAQ H3s are exempt: a how-to page's H1 is its keyword in
+  # natural English, and the FAQ rule asks for the researched questions verbatim.
+  KW_HEADINGS=$(awk '/^## /{faq=($0=="## FAQ")} /^#{2,3} /{if (!(faq && $0 ~ /^### /)) print}' "$OUTLINE")
   proper_noun_keywords "$BRIEF" | while read -r k; do
-    grep -E '^#{1,3} ' "$OUTLINE" | grep -qF "$k" && warn "keyword with a lowercased name pasted into a heading: $k"
+    grep -qF "$k" <<< "$KW_HEADINGS" && warn "keyword with a lowercased name pasted into a heading: $k"
   done || true
   ;;
 
@@ -192,9 +213,14 @@ draft)
   (( WORDS >= LO && WORDS <= HI )) || warn "$WORDS words; target $WC (accepted $LO-$HI)"
   CTA=$(jq -r .cta "$BRIEF")
   awk '/^## /{f=($0=="## Conclusion")} f' "$DRAFT" | grep -qF "$CTA" || warn "CTA not found verbatim in the Conclusion"
+  # The cap is sized to the article: one use per 250 words, never below 2. A flat
+  # cap of 2 warned on every run of a correct 2000-word article, which used its
+  # head term 5 to 7 times in the draft and 3 to 4 after the rewrite (measured at
+  # three seeds, 2026-09-22). A warning that always fires is one nobody reads.
+  KWMAX=$(( WC / 250 )); (( KWMAX >= 2 )) || KWMAX=2
   jq -r '.keywords[]' "$BRIEF" | while read -r k; do
     N=$(grep -v '^#' "$DRAFT" | grep -oiF "$k" | wc -l || true)
-    (( N <= 2 )) || warn "keyword used $N times in the body (max 2): $k"
+    (( N <= KWMAX )) || warn "keyword used $N times in the body (max $KWMAX for $WC words): $k"
     grep -qiF "**$k**" "$DRAFT" && warn "keyword bolded: $k"
   done || true
   proper_noun_keywords "$BRIEF" | while read -r k; do
