@@ -5,8 +5,15 @@ whether they can follow it.
 
 **Sections are stages of the task, in the order the reader performs them.** Not
 themes, not benefits. "Disassembling the pump" comes before "Cleaning the
-impeller" because that is the order of the work. One short opening section may
-say why the task matters; everything after it is the task.
+impeller" because that is the order of the work.
+
+**If the page needs an opening section on why the task matters, propose it as one
+of your sections and count it.** Do not leave it implied: a list of pure steps
+reads as incomplete to whoever writes the outline, who then adds the opening
+section on top of yours and overshoots the section count. Measured 2026-09-22: a
+five-step spine with no opening produced outlines of 6, 7 and 8 sections against
+a band of 3 to 5, while a brief whose first entry was its own "why" hit its band
+at every seed.
 
 **A step that needs a quantity names it as something the author must supply.**
 Soak times, dilution ratios, intervals and torque settings are real and specific,

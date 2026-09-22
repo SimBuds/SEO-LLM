@@ -186,8 +186,13 @@ TITLE=$(tag_text "$FLAT" '<title[^>]*>[^<]*</title>')
 DESC=$({ grep -oiE '<meta[^>]+name[[:space:]]*=[[:space:]]*"?description"?[^>]*>' <<< "$FLAT" | sed -n '1p' |
        grep -oiE 'content[[:space:]]*=[[:space:]]*("[^"]*"|'"'"'[^'"'"']*'"'"')' | sed -n '1p' |
        sed -E 's/^[^=]*=[[:space:]]*.//; s/.$//'; } || true)
-HEADINGS=$({ grep -oiE '<h[1-3][^>]*>[^<]*(<[^/][^>]*>[^<]*)*</h[1-3]>' <<< "$FLAT" |
-  sed -E 's#^<(h[1-3])[^>]*>#\1\t#I; s#</h[1-3]>$##I; s#<[^>]*>##g; s# +# #g; s#\t #\t#; s# $##' |
+# Any inner markup that is not the closing heading tag counts as heading content.
+# The old pattern allowed nested opening tags but not closing ones, so
+# "<h2><span>Title</span></h2>" matched nothing, which is the commonest heading
+# markup on the web. Measured 2026-09-22 on a cached competitor: 8 matches where
+# the page has 31 headings, and the 23 missed were its entire article structure.
+HEADINGS=$({ grep -oiE '<h[1-3][^>]*>([^<]|<[^/]|</[^hH])*</h[1-3][^>]*>' <<< "$FLAT" |
+  sed -E 's#^<(h[1-3])[^>]*>#\1\t#I; s#</h[1-3][^>]*>$##I; s#<[^>]*>##g; s# +# #g; s#\t #\t#; s# $##' |
   grep -vE $'^h[1-3]\t*$'; } || true)
 # Body text for the word count: whole regions go first, then the remaining tags.
 # sed cannot match non-greedily, so the old pair of expressions left any script

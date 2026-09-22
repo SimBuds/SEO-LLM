@@ -68,6 +68,13 @@ FILLED=$(jq -nrj --rawfile t "$TEMPLATE" --argjson b "$BRIEF_JSON" \
       # outline returned 7, 7, 8 and 9 sections where 4-6 and 3-5 were allowed.
       MIN_SECTIONS: (if $b.word_count <= 1000 then "2" elif $b.word_count <= 1800 then "3" else "4" end),
       MAX_SECTIONS: (if $b.word_count <= 1000 then "3" elif $b.word_count <= 1800 then "5" else "6" end),
+      # What one section can afford, not what the article is long enough for. An
+      # H3 under about 150 words is a stub, and a section carrying three of them
+      # on a 400-word budget is where a run stopped: over length at one seed,
+      # a dropped heading at the next (2026-09-22).
+      MAX_H3: (((if $b.word_count <= 1000 then 3 elif $b.word_count <= 1800 then 5 else 6 end) as $sec
+                | ($b.word_count / $sec / 150) | round)
+               | if . < 1 then 1 elif . > 4 then 4 else . end | tostring),
       KEYWORDS: ($b.keywords | join(", ")),
       CTA: $b.cta,
       FACTS: (($b.facts // []) | if length == 0 then "(none provided)" else map("- " + .) | join("\n") end),
@@ -97,7 +104,7 @@ LEFT=$(grep -oE '\{\{[A-Z_]+\}\}' "$TEMPLATE" | sort -u | while read -r p; do
     "{{SOURCE_TEXT}}") [[ -n "$SOURCE" ]] || echo "$p" ;;
     "{{TOPIC}}"|"{{BRIEF}}"|"{{AUDIENCE}}"|"{{TONE}}"|"{{WORD_COUNT}}"|"{{KEYWORDS}}"|"{{CTA}}"|"{{FACTS}}"|\
     "{{SEARCH_INTENT}}"|"{{MUST_COVER}}"|"{{QUESTIONS}}"|"{{EXISTING_PAGE}}"|\
-    "{{MIN_SECTIONS}}"|"{{MAX_SECTIONS}}")
+    "{{MIN_SECTIONS}}"|"{{MAX_SECTIONS}}"|"{{MAX_H3}}")
       [[ -n "$BRIEF" ]] || echo "$p" ;;
     *) jq -e --arg k "${p:2:${#p}-4}" 'has($k)' <<< "$EXTRA" > /dev/null || echo "$p" ;;
   esac

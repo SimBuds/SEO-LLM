@@ -518,7 +518,7 @@ and three prompt wordings were measured against it without success, so the fix
 is deterministic rather than verbal. A valid outline comes back byte-identical,
 and an outline missing something real still fails its check.
 
-`word_count` also sizes the outline: up to 1000 words gets 2 to 3 topic sections, up to 1800 gets 3 to 5, and longer gets 4 to 6 (the table in [prompts/outline.md](prompts/outline.md), mirrored in `scripts/check.sh`).
+`word_count` also sizes the outline: up to 1000 words gets 2 to 3 topic sections, up to 1800 gets 3 to 5, and longer gets 4 to 6, and the prompt is given those two numbers rather than the table to read. The H3 ceiling per section is derived the same way, from what a section of that article can afford at about 150 words per H3, because three H3s on a 400-word budget is where a draft starts choosing between its length and its headings (the table in [prompts/outline.md](prompts/outline.md), mirrored in `scripts/check.sh`).
 
 ## Section-by-section drafting
 

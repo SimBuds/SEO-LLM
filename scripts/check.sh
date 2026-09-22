@@ -156,7 +156,13 @@ outline)
   (( TOPIC_H2 >= MIN && TOPIC_H2 <= MAX )) || warn "$TOPIC_H2 topic sections; $MIN-$MAX expected for $WC words"
   FAQ_Q=$(awk '/^## /{f=($0=="## FAQ")} f && /^### /' "$OUTLINE" | wc -l)
   (( FAQ_Q >= FMIN && FAQ_Q <= FMAX )) || warn "$FAQ_Q FAQ questions; $FMIN-$FMAX expected for $WC words"
-  H3MAX=$(( WC <= 1000 ? 2 : WC <= 1800 ? 3 : 4 ))
+  # The same ceiling the outline prompt is given: what a section of this article
+  # can afford, from its own section count, rather than a table keyed on length.
+  TOPIC_SECTIONS=$(awk '/^## /{if ($0 !~ /^## (FAQ|Conclusion)$/) n++} END{print n+0}' "$OUTLINE")
+  (( TOPIC_SECTIONS > 0 )) || TOPIC_SECTIONS=1
+  H3MAX=$(( (WC / TOPIC_SECTIONS + 75) / 150 ))
+  (( H3MAX >= 1 )) || H3MAX=1
+  (( H3MAX <= 4 )) || H3MAX=4
   awk -v max="$H3MAX" '/^## /{if (h && n > max) print h " (" n " H3s)"; h=$0; n=0; if (h ~ /^## (FAQ|Conclusion)$/) h=""} /^### /{n++} END{if (h && n > max) print h " (" n " H3s)"}' "$OUTLINE" \
     | while read -r l; do warn "more than $H3MAX H3s for $WC words: $l"; done
   CONC_H3=$(awk '/^## /{f=($0=="## Conclusion")} f && /^### /' "$OUTLINE" | wc -l)

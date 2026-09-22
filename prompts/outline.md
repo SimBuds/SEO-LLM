@@ -36,7 +36,7 @@ Requirements:
 
 - Start with a single `# ` H1 title that is specific, search-intent-aligned, and not generic. **It may not promise more than the brief delivers.** The topic above is what the page is; an H1 that says "Best", "Top picks" or "Our picks" commits the article to naming products, so write one only when the brief's facts name products it can recommend. With no such facts, title the page by what the reader will be able to decide.
 - Follow with **exactly {{MIN_SECTIONS}} to {{MAX_SECTIONS}} topic `## ` H2 sections** that together cover the topic with strong semantic breadth. That count is a hard limit, not a target: when the brief lists more subtopics than you have sections, group related ones into one section rather than adding a section.
-- Under each topic H2, include `### ` H3 subsections per the table, only where they add real structure (skip H3s when they would be filler).
+- Under each topic H2, include **at most {{MAX_H3}} `### ` H3 subsections**, and only where they add real structure (skip H3s when they would be filler). That number is what a section of this article can afford: an H3 with under about 150 words behind it is a stub, and a section carrying more than it can fill forces the draft to choose between its length and its headings.
 - Include one H2 named exactly `## FAQ` near the end with H3 questions (count per the table) phrased the way the audience would search them.
 - End with one H2 named exactly `## Conclusion`, with no H3s under it.
 - **No heading may be about a figure the brief cannot supply.** If the source facts
