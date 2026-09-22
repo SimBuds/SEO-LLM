@@ -41,7 +41,22 @@ Then `--merge` writes `briefs/<slug>.json`.
    ```
    It runs the first stage with no file, prints it, and stops. It never runs two
    stages in one invocation, because each one is yours to approve.
-2. Show the stage's JSON and say what it commits the article to. Then ask
+2. Show the stage's JSON and say what it commits the article to, then audit it
+   against the research before you ask anything. `check.sh stage` proves a
+   section's `source` string appears somewhere in the research; only you can say
+   whether it supports the section. Per stage:
+   - **intent:** is `target_audience` a person or a category label? Does
+     `tone_reason` cite a page that really fetched?
+   - **structure:** for each section, read the evidence its `source` names and say
+     whether it holds the section up. A section sourced to "page purpose" rests on
+     one sentence the user typed. A section promising products when the brief has
+     no `facts` will be written from nothing: say so here, not after drafting.
+   - **targets:** does the `cta` promise something the research nowhere shows the
+     business offers? Name any brand or retailer it mentions and where it appears
+     in the research.
+   - **facts:** read `omitted` as closely as `facts`. A real business specific
+     parked there is a loss, and a qualifier dropped from a kept fact is worse.
+   Then ask
    plainly: **approve, or say what to change?**
 3. If the user wants a change, either edit the stage file directly with their
    wording, or rerun that stage with `--redo <stage>`. Editing is better when

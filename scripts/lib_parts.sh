@@ -11,12 +11,18 @@
 ABSOLUTE_SENTENCE='(^|[[:space:]])([^.!?]|\.[^[:space:]])*\b(all|every|always|never|guarantee[sd]?|any circumstances|complete control|entirely|without compromise)\b([^.!?]|\.[^[:space:]])*[.!?]'
 
 # draft_factor <word_count>: how far above word_count the draft aims, in
-# percent. The rewrite and its re-verification cut 20-35%, depending on how
-# much filler a page's facts leave room for. A lower factor for short pages was
-# tried and left a thin-facts 1000-word page 28% short, so one factor applies
-# to every length; an overshoot only warns. DRAFT_FACTOR overrides it.
+# percent. A lower factor for short pages was tried and left a thin-facts
+# 1000-word page 28% short, so one factor applies to every length and an
+# overshoot only warns. DRAFT_FACTOR overrides it.
+#
+# 135 was set from an assumed 20-35% cut by the rewrite and its re-verification.
+# Two measured runs cut 13% and 17.5%, so the article landed 39% over its target
+# on 2026-09-21 (2000 asked, 2790 delivered). 120 is the factor that lands on
+# target at the cut actually observed: 2000 * 1.20 = 2400, less 17.5% is 1980.
+# Re-measure after any prompt change that affects how much filler the draft
+# writes, because that is what the rewrite removes.
 draft_factor() {
-  echo "${DRAFT_FACTOR:-135}"
+  echo "${DRAFT_FACTOR:-120}"
 }
 
 # restore_headings <heading-source> <part>: headings are fixed, but the model

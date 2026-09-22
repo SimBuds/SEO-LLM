@@ -185,6 +185,21 @@ if (( MAX_KEYWORDS > 0 && KEYWORDS_TOTAL > MAX_KEYWORDS )); then
 fi
 
 # --- competitor pages ------------------------------------------------------
+# Navigation and site furniture is not a subtopic. These headings reach the brief
+# stage's grounding haystack, so an invented section can trace to "Help" and pass
+# the check that exists to stop exactly that. Measured on a live run: 6 of 16
+# collected headings were furniture, 4 of them from one retail page. The match is
+# whole-string and case insensitive, so a real heading that merely contains one of
+# these words ("How to help your cat drink") is kept.
+FURNITURE='^(about|about us|help|support|services|stores|store locator|menu|search|
+skip to|skip to content|keyboard shortcuts|share this|share|follow us|follow via email|
+newsletter|sign up|subscribe|categories|archives|tags|related posts|you may also like|
+recent posts|comments?|[0-9]+ comments?|one comment|leave a reply|leave a comment|
+privacy policy|terms of service|contact|contact us|cart|account|my account|
+footer|navigation|breadcrumb|quick links|customer service|shipping|returns)$'
+FURNITURE=$(tr -d '\n' <<< "$FURNITURE")
+DROPPED_HEADINGS=0
+
 COMPETITORS='[]'
 URLS_FILE="$DIR/competitors.txt"
 if [[ -r "$URLS_FILE" ]]; then
@@ -201,6 +216,12 @@ if [[ -r "$URLS_FILE" ]]; then
       COMPETITORS=$(jq --arg u "$url" --arg r "$reason" --argjson c "$rc" \
         '. + [{url: $u, fetched: false, error: $r, exit: $c}]' <<< "$COMPETITORS")
     else
+      before=$(jq '[.headings[]?] | length' <<< "$page")
+      page=$(jq --arg f "$FURNITURE" '
+        .headings = [.headings[]? | select((.text | ascii_downcase
+                     | gsub("^\\s+|\\s+$"; "") | test($f)) | not)]' <<< "$page")
+      after=$(jq '[.headings[]?] | length' <<< "$page")
+      DROPPED_HEADINGS=$(( DROPPED_HEADINGS + before - after ))
       COMPETITORS=$(jq --argjson p "$page" '. + [$p + {fetched: true}]' <<< "$COMPETITORS")
     fi
     rm -f "$err"
@@ -258,6 +279,7 @@ jq -n \
   --argjson keywords_cutoff "$KEYWORDS_CUTOFF" \
   --argjson competitors "$COMPETITORS" \
   --argjson site_pages "$SITE_PAGES" \
+  --argjson headings_dropped "$DROPPED_HEADINGS" \
   --arg inputs "${INPUT_FILES[*]:-}" '
   {
     slug: $slug,
@@ -269,6 +291,7 @@ jq -n \
     keywords_cutoff: $keywords_cutoff,
     competitors: $competitors,
     competitor_word_counts: ($competitors | map(select(.fetched and .word_count != null) | .word_count)),
+    headings_dropped: $headings_dropped,
     site_pages: $site_pages
   }' > "$OUT"
 

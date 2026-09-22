@@ -341,6 +341,51 @@ need_suggested() { # writes suggested.txt, asking once and reusing it afterwards
   return 0
 }
 
+facts_file() { printf '%s/_ingest/%s.txt' "$BRIEFS" "$SLUG"; }
+
+# What the page may state as fact about the business or the products. The facts
+# stage reads briefs/_ingest/<slug>.txt and records an empty list when it is
+# missing, so typing the lines here writes the file /seo-ingest would have
+# written and nothing downstream changes. Asked once: an empty file is a real
+# answer and means this page states no business specifics.
+need_facts() { # writes the facts source, asking once
+  local f; f=$(facts_file)
+  [[ -e "$f" ]] && return 0
+  local -a lines=()
+  say ""
+  say "What may this page state as fact? Prices, models you have tested, policies,"
+  say "timelines, anything specific to your business or products."
+  say "One per line, blank to finish. Nothing here means the page stays general and"
+  say "cannot recommend a specific product."
+  read_lines lines
+  mkdir -p "$(dirname "$f")"
+  : > "$f"
+  (( ${#lines[@]} )) && printf '%s\n' "${lines[@]}" > "$f"
+  if (( ${#lines[@]} )); then
+    say "recorded ${#lines[@]} fact(s) in $f"
+    return 0
+  fi
+  say "no facts recorded, so the facts stage will write an empty list"
+  # A page that recommends products and has no facts is the combination that
+  # produced a section naming no product at all. It is worth one more question.
+  local yn
+  read -r -p "Does this page recommend specific products? [y/N] " yn
+  if [[ "$yn" == [yY]* ]]; then
+    warn "with no facts, the model has nothing to recommend from, and the prompts"
+    warn "correctly refuse to invent a product, so those sections arrive empty."
+    say "Add the products now, one per line, or press enter to write the page as a"
+    say "general guide instead."
+    read_lines lines
+    if (( ${#lines[@]} )); then
+      printf '%s\n' "${lines[@]}" > "$f"
+      say "recorded ${#lines[@]} fact(s) in $f"
+    else
+      say "kept as a general guide: no section should promise specific products."
+    fi
+  fi
+  return 0
+}
+
 need_purpose() { # sets PURPOSE, asking once and reusing it afterwards
   local f; f=$(purpose_file)
   if [[ -r "$f" ]]; then
@@ -363,6 +408,48 @@ confirm_replace() { # confirm_replace <path> <description>
   say "$2 already exists."
   read -r -p "Replace it? [y/N] " yn
   [[ "$yn" == [yY]* ]]
+}
+
+# The chosen keyword is confirmed here rather than edited into the JSON by hand.
+# A swap rewrites the primary and re-runs the same check, so a human choice is
+# verified exactly like a generated one.
+confirm_keywords() { # confirm_keywords <dir> [suggested.txt]; 0 when settled
+  local dir="$1"; shift
+  local -a sugarg=("$@")
+  local kw="$dir/keywords.json" choice n i term
+  while true; do
+    say ""
+    say "Primary keyword: $(jq -r '.primary_keyword' "$kw")"
+    read -r -p "Accept it [a], swap it for another researched term [s], or reseed [r]? [a] " choice
+    case "${choice:-a}" in
+      a|A) return 0 ;;
+      r|R) return 1 ;;
+      s|S)
+        say ""
+        say "The researched terms, highest demand first:"
+        mapfile -t TERMS < <(jq -r '.keywords[0:15][] | .keyword' "$dir/research.json")
+        i=1; for term in "${TERMS[@]}"; do printf '  %2d  %s\n' "$i" "$term"; i=$((i + 1)); done
+        read -r -p "Number, or enter to go back: " n
+        [[ "$n" =~ ^[0-9]+$ ]] && (( n >= 1 && n <= ${#TERMS[@]} )) || { say "kept"; continue; }
+        term="${TERMS[$((n - 1))]}"
+        # The old primary is worth keeping as a secondary, but the list is capped
+        # at 6 and may not repeat the new primary.
+        jq --arg new "$term" '
+          (.primary_keyword) as $old
+          | .primary_keyword = $new
+          | .secondary_keywords = ([$old] + .secondary_keywords
+                                   | map(select(. != $new)) | unique_by(.) | .[0:6])
+          | .rationale = "Primary keyword chosen by hand at the menu, replacing \($old). " + .rationale' \
+          "$kw" > "$kw.new" && mv "$kw.new" "$kw"
+        say "primary keyword is now: $term"
+        run_check keywords "$kw" "$dir/research.json" "${sugarg[@]}" || {
+          err "that choice does not pass the check, see above. Pick another."
+          continue
+        }
+        ;;
+      *) err "answer a, s or r" ;;
+    esac
+  done
 }
 
 action_keywords() {
@@ -408,6 +495,14 @@ action_keywords() {
     if run_check keywords "$dir/keywords.json" "$dir/research.json" "${sugarg[@]}"; then
       say ""
       say "Read the rationale against your research: it is the one field no check can verify."
+      confirm_keywords "$dir" "${sugarg[@]}"
+      return 0
+    fi
+    # A swap is what fixes an invented or merged keyword, and a reseed is not, so
+    # it is offered on the failure too.
+    say ""
+    say "A keyword the check rejects is usually one the model invented or merged."
+    if confirm_keywords "$dir" "${sugarg[@]}"; then
       return 0
     fi
     (( seed >= 2 )) && {
@@ -425,6 +520,7 @@ action_brief_stage() {
   need_router || return 1
   need_purpose || return 1
   need_type || return 1
+  need_facts || return 1
   local n; n=$(stage_count_brief_stages)
   local names=(intent structure targets facts)
   if (( n >= 4 )); then
@@ -477,9 +573,24 @@ action_brief() {
     err "the merge failed, see the message above."
     return 1
   }
+  # The median is the default, not the only answer. Asking here is what stops the
+  # brief from needing a hand edit before the outline, which is where every other
+  # stage reads the length from.
+  local current answer
+  current=$(jq -r '.word_count' "$brief")
   say ""
-  say "word_count comes from the competitor median, not from the model."
-  say "To use a different length, edit $brief now, before the outline."
+  say "word_count is $current, the median of the competitor pages that fetched."
+  while true; do
+    read -r -p "Press enter to keep it, or type a different word count: " answer
+    [[ -z "$answer" ]] && break
+    if [[ "$answer" =~ ^[0-9]+$ ]] && (( answer >= 300 && answer <= 6000 )); then
+      jq --argjson w "$answer" '.word_count = $w' "$brief" > "$brief.new" && mv "$brief.new" "$brief"
+      say "word_count set to $answer"
+      run_check brief "$brief"
+      break
+    fi
+    err "a whole number between 300 and 6000, or enter to keep $current"
+  done
 }
 
 action_outline() {
@@ -555,7 +666,15 @@ action_review() {
   rejected=$(jq -r '.issues[]? | select(.accepted == false) | "  [\(.kind)] \(.sentence)"' \
                "$out"/*/*.verify.json 2>/dev/null)
   if [[ -z "$rejected" ]]; then
-    say "  none, every flagged sentence was either fixed or supported"
+    # With no facts there is nothing to check a sentence against, so the verifier
+    # returning nothing says only that it could not look, not that the article is
+    # sound. Reporting that as a clean pass is the false report AGENTS.md forbids.
+    local nfacts; nfacts=$(jq '.facts | length' "$BRIEFS/$SLUG.json" 2>/dev/null || echo 0)
+    if (( nfacts == 0 )); then
+      warn "  the brief carries no facts, so the fact checker had nothing to compare against and nothing was verified"
+    else
+      say "  none, every flagged sentence was either fixed or supported"
+    fi
   else
     printf '%s\n' "$rejected"
   fi

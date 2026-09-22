@@ -46,7 +46,22 @@ one decision every later stage is built on.
 4. On a FAIL, retry once with seed 2. A second failure means the research does
    not support a confident choice: show the FAIL lines and the research WARNs,
    and ask the user to pick the primary keyword rather than retrying again.
-5. Report:
+5. Audit the result yourself against `research.json`, because this is the part no
+   check can do. `check.sh` proves every keyword exists in the research and that a
+   superlative about the chosen term matches the figures. It cannot tell you
+   whether the reasoning is honest. Read and report:
+   - **every claim the `rationale` makes about the data.** Which term really has
+     the most volume, impressions or clicks? Is a term called "too competitive"
+     actually harder, or was that asserted? A claim about a competitor page that
+     failed to fetch is not evidence, it is invention.
+   - **the intent read against the competitor pages that actually fetched.** Two
+     retail category pages cannot establish that the intent is a listicle.
+   - **where `must_cover` came from.** If every entry traces to one competitor,
+     say so: the rule asks for subtopics several pages share, and one page's table
+     of contents is not that. Name the page.
+   - **`business_potential.reason`** against what the research shows the business
+     sells, which is usually nothing. Say when the score rests on an assumption.
+6. Report:
    - the primary keyword and why it won over the alternatives, in the model's own
      rationale
    - the secondary keywords
@@ -56,7 +71,7 @@ one decision every later stage is built on.
    - the questions and the must-cover subtopics, which become the FAQ and the
      sections
    - every WARN line
-6. Close with: *"Review `research/<slug>/keywords.json`, then run `/seo-brief
+7. Close with: *"Review `research/<slug>/keywords.json`, then run `/seo-brief
    <slug>`."*
 
 ## Failure handling

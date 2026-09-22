@@ -75,11 +75,11 @@ Four stages, one model call each, and each stage sees the ones before it. From t
 1. **intent:** topic, audience, reader goal, tone, each with its reason.
 2. **structure:** the sections this page needs, each tagged with where it came from, plus the FAQ questions and the gaps in the ranking pages.
 3. **targets:** the brief's keywords and the call to action.
-4. **facts:** the business specifics, taken only from `briefs/_ingest/<slug>.txt`. With no source document the list is written empty and no call is made.
+4. **facts:** the business specifics, taken only from `briefs/_ingest/<slug>.txt`. The menu asks for them before the stages run and writes that file, so a document is no longer the only way to supply them. With nothing supplied the list is written empty and no call is made.
 
 Editing a stage file is usually better than rerunning it, because a rerun is a fresh sample and may change other fields too. `--redo <stage>` rebuilds one and drops every stage after it.
 
-**`--merge`** writes `briefs/<slug>.json` from the approved stages and runs `check.sh brief`. It refuses to overwrite an existing brief without `--force`. The word count is computed from the competitor median, not asked of the model. The merge also carries the research forward into the brief's four optional keys: `search_intent` from the keyword choice, `must_cover` and `questions` from the structure stage, and `existing_page` from the research when the page is live.
+**`--merge`** writes `briefs/<slug>.json` from the approved stages and runs `check.sh brief`. It refuses to overwrite an existing brief without `--force`. The word count is computed from the competitor median, not asked of the model, and the menu then offers it to you as a default you can replace. The merge also carries the research forward into the brief's four optional keys: `search_intent` from the keyword choice, `must_cover` and `questions` from the structure stage, and `existing_page` from the research when the page is live.
 
 ## 4. `/seo-ingest <file>`: document → brief
 
@@ -111,7 +111,7 @@ Editing a stage file is usually better than rerunning it, because a rerun is a f
 
 1. **Preconditions:** the brief passes its check and `outline.md` exists and passes its check. Otherwise the run stops and asks for `/seo-outline` first.
 2. **Split:** the outline becomes an intro plus one part per section, including the FAQ and the Conclusion.
-3. **Budget:** the draft aims at **135%** of the word count, because the rewrite cuts it back. `DRAFT_FACTOR` overrides it.
+3. **Budget:** the draft aims at **120%** of the word count, because the rewrite cuts it back. It was 135% until 2026-09-21, when two measured runs cut 13% and 17.5% instead of the assumed 20 to 35%. `DRAFT_FACTOR` overrides it. A part over 140% of its own budget now fails and is regenerated instead of being stitched in.
    - Split: intro 8% (at least 60 words), conclusion 6%, FAQ 60 words per question (at most 20%). The rest goes to the topic sections by subsection count.
 4. **Keyword spread:** each main keyword's cue is kept in at most 2 parts, and the FAQ gets none.
 5. **Drafting:** one Qwen call per part at temperature 0.5, using `prompts/intro.md`, `prompts/section.md` or `prompts/conclusion.md`.

@@ -129,9 +129,10 @@ run_stage() { # run_stage <index> <stage>
 
   # The facts stage reads a source document instead of the research: business
   # specifics come from what the user supplied, never from competitors.
+  local source=""
   if [[ "$stage" == facts ]]; then
-    local source="${BRIEFS_DIR:-briefs}/_ingest/$SLUG.txt"
-    if [[ ! -r "$source" ]]; then
+    source="${BRIEFS_DIR:-briefs}/_ingest/$SLUG.txt"
+    if [[ ! -s "$source" ]]; then
       # No source means no facts. That is a real answer, so it is recorded
       # without spending a call on it.
       jq -n '{facts: [], omitted: ["no source document at briefs/_ingest/<slug>.txt, so no business specifics were available"]}' > "$out"
@@ -144,6 +145,10 @@ run_stage() { # run_stage <index> <stage>
     --set-file RESEARCH="$RESEARCH"
     --set-file KEYWORD_CHOICE="$KEYWORDS"
     --set PAGE_PURPOSE="$PURPOSE")
+  # prompts/brief-facts.md is the only template with {{SOURCE_TEXT}}, and it was
+  # never passed: the stage worked only because a missing source returns early.
+  # Found 2026-09-21, the first time a source document existed.
+  [[ -n "$source" ]] && fill+=(--source "$source")
   prior=$(prior_json "$idx")
   if [[ "$prior" != "{}" ]]; then
     printf '%s\n' "$prior" | jq . > "${out%.json}.prior.json"
@@ -175,6 +180,11 @@ run_stage() { # run_stage <index> <stage>
       # here where a reseed is one command.
       if [[ "$stage" == structure ]]; then
         bash "$HERE/check.sh" stage "$out" "$RESEARCH" "$KEYWORDS" || true
+      fi
+      # Same reasoning for the call to action: a retailer or brand it invents
+      # travels into the draft as fact, and a reseed here is one command.
+      if [[ "$stage" == targets ]]; then
+        bash "$HERE/check.sh" targets "$out" "$RESEARCH" || true
       fi
       return 0
     fi

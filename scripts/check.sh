@@ -13,12 +13,13 @@
 #                    (suggested.txt: keywords typed at the menu, one per line,
 #                     grounding a term the research does not carry)
 #   check.sh stage    <structure-stage.json> <research.json> <keywords.json>
+#   check.sh targets  <targets-stage.json> <research.json>
 # Prints "FAIL: ..." for problems that must be fixed or regenerated and
 # "WARN: ..." for problems a human should look at. Exits 1 on any FAIL, else 0.
 
 set -euo pipefail
 
-MODE="${1:?mode required: brief|outline|section|draft|rewrite|research|keywords|stage}"; shift
+MODE="${1:?mode required: brief|outline|section|draft|rewrite|research|keywords|stage|targets}"; shift
 FAILS=0
 fail() { echo "FAIL: $*"; FAILS=$((FAILS + 1)); }
 warn() { echo "WARN: $*"; }
@@ -30,6 +31,15 @@ numbers() { sed -E 's/^[[:space:]]*[0-9]+\.[[:space:]]//' | grep -oE '[0-9][0-9,
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib_parts.sh"
 absolutes() { grep -v '^#' "$1" | grep -oiE "$ABSOLUTE_SENTENCE" || true; }
+
+# A heading that promises specific products. With an empty facts list the draft
+# has nothing to recommend from, and the prompts correctly refuse to invent a
+# model, so the section arrives empty of substance. Seen live: three subsections
+# under "Top Picks" that named no fountain at all.
+# "Best <thing>" is the canonical picks heading, so it counts wherever it starts a
+# heading, except the "best practice" shape, which is advice rather than a product.
+PICKS_PATTERN='(^|: )best (?!practice)[a-z0-9]|top [0-9]* *picks|our picks|recommended (models|products|options)|product roundup|top [0-9]+ '
+picks_headings() { grep -iP "$PICKS_PATTERN" || true; }
 
 brief_valid() {
   # The seven keys are required. The four research keys and content_type are
@@ -89,7 +99,11 @@ brief)
       [[ "$k" == *" "* ]] || warn "single-word keyword: $k"
       grep -qiE '\b(faq|contact|about)$' <<< "$k" && warn "page-name keyword, check it has search demand: $k"
     done || true
-    (( $(jq '.facts | length' "$BRIEF") == 0 )) && warn "facts is empty: the draft will have no business specifics"
+    if (( $(jq '.facts | length' "$BRIEF") == 0 )); then
+      warn "facts is empty: the draft will have no business specifics"
+      PROMISES=$(jq -r '.topic, (.must_cover[]? // empty)' "$BRIEF" | picks_headings | paste -sd'|' | sed 's/|/; /g')
+      [[ -z "$PROMISES" ]] || warn "facts is empty but the brief promises product picks, so those sections will name no product: $PROMISES"
+    fi
     if [[ -n "$SOURCE" ]]; then
       SRC_NUMS=$(numbers < "$SOURCE")
       jq -r '.facts[]' "$BRIEF" | while read -r f; do
@@ -108,6 +122,10 @@ outline)
   grep -qx '## Conclusion' "$OUTLINE" || fail "missing '## Conclusion'"
   STRAY=$(grep -nvE '^(#{1,3} .+|_Intent: .+_|Keywords: .+|)$' "$OUTLINE" || true)
   [[ -z "$STRAY" ]] || fail "body text in outline (only headings, _Intent:_ and Keywords: lines allowed):"$'\n'"$(head -5 <<< "$STRAY")"
+  if (( $(jq '.facts | length' "$BRIEF") == 0 )); then
+    PROMISES=$(grep '^#\{1,3\} ' "$OUTLINE" | picks_headings | sed 's/^#* //' | paste -sd'|' | sed 's/|/; /g')
+    [[ -z "$PROMISES" ]] || warn "the brief has no facts but these headings promise product picks, so they will name no product: $PROMISES"
+  fi
   H2=$(grep -c '^## ' "$OUTLINE" || true); INTENT=$(grep -c '^_Intent: ' "$OUTLINE" || true)
   (( H2 == INTENT )) || fail "$H2 H2 sections but $INTENT _Intent:_ lines"
   # Size rules mirror the table in prompts/outline.md.
@@ -144,7 +162,15 @@ section)
   grep -qE '^(_Intent: |Keywords: )' "$PART" && fail "outline guidance lines left in"
   grep -qE '^```' "$PART" && fail "code fence in section"
   GOT=$(grep -v '^#' "$PART" | wc -w)
-  (( GOT >= WORDS * 60 / 100 && GOT <= WORDS * 125 / 100 )) || warn "$GOT words; budget $WORDS"
+  # A part that ignores its budget is the other half of the overshoot: on
+  # 2026-09-21 one part came back at 163% of budget and was stitched in, warned
+  # about and never rewritten down. Past 140% the part is regenerated at seed 2,
+  # which is the same recovery every other section failure uses.
+  if (( GOT > WORDS * 140 / 100 )); then
+    fail "$GOT words; budget $WORDS (over 140%, regenerate rather than stitch it in)"
+  elif (( GOT < WORDS * 60 / 100 || GOT > WORDS * 125 / 100 )); then
+    warn "$GOT words; budget $WORDS"
+  fi
   if [[ "$BLOCK" != "-" ]] && head -1 "$BLOCK" | grep -qx '## Conclusion'; then
     grep -qF "$(jq -r .cta "$BRIEF")" "$PART" || fail "CTA missing from the conclusion"
   fi
@@ -180,7 +206,12 @@ draft)
   fi
   KNOWN=$( { jq -r '.facts[], .word_count' "$BRIEF"; cat "$OUTLINE"; } | numbers)
   UNKNOWN=$(numbers < "$DRAFT" | grep -vxF -f <(printf '%s\n' "$KNOWN") | paste -sd' ' || true)
-  [[ -z "$UNKNOWN" ]] || warn "numbers in draft not found in facts or outline (check for invented specifics): $UNKNOWN"
+  # A figure the facts cannot support is invented, whatever it sounds like. This
+  # was a WARN until 2026-09-21, when "less than 30 decibels" and "soak for 15
+  # minutes" went through the draft, the rewrite and the review, flagged twice
+  # and blocked never. Either the number comes from the brief's facts or the
+  # outline, or it does not belong in the article.
+  [[ -z "$UNKNOWN" ]] || fail "numbers not in the facts or the outline, so they are invented: $UNKNOWN"
   ;;
 
 rewrite)
@@ -197,6 +228,19 @@ rewrite)
   (( NW * 100 >= OW * 50 && NW * 100 <= OW * 120 )) || fail "length changed from $OW to $NW words (50-120% allowed)"
   ADDED=$(comm -13 <( { cat "$OLD"; jq -r '.facts[]' "$BRIEF"; } | numbers) <(numbers < "$NEW") | paste -sd' ')
   [[ -z "$ADDED" ]] || fail "new numbers not in the input or the facts: $ADDED"
+  # The edit's job includes fixing pasted keyword phrases, so it may never use a
+  # keyword more often than the draft did. Measured on a live run: the primary
+  # keyword went from 5 uses in draft.md to 9 in final.md, part by part, with
+  # nothing here to see it.
+  while read -r kw; do
+    [[ -n "$kw" ]] || continue
+    # grep exits 1 on no match and pipefail is on, so an absent keyword would
+    # abort the whole check with no message and every edit would be rejected as
+    # if it had failed. Seen on the first live run of this rule.
+    ob=$( { grep -oiF "$kw" "$OLD" || true; } | wc -l )
+    nb=$( { grep -oiF "$kw" "$NEW" || true; } | wc -l )
+    (( nb <= ob )) || fail "the edit uses \"$kw\" $nb times where the draft used it $ob"
+  done < <(jq -r '.keywords[]' "$BRIEF")
   OA=$(absolutes "$OLD" | grep -c . || true); NA=$(absolutes "$NEW" | grep -c . || true)
   (( NA <= OA )) || fail "absolute-wording sentences grew from $OA to $NA:"$'\n'"$(absolutes "$NEW" | head -4)"
   CTA=$(jq -r .cta "$BRIEF")
@@ -249,6 +293,8 @@ research)
       warn "no keyword carries impressions, clicks or a volume: the choice rests on the competitor pages"
     fi
   fi
+  DROPPED=$(jq -r '.headings_dropped // 0' "$RESEARCH")
+  (( DROPPED == 0 )) || warn "$DROPPED competitor heading(s) were dropped as page furniture (About, Help, comments and the like), so they cannot be mistaken for subtopics"
   OK=$(jq '[.competitors[] | select(.fetched)] | length' "$RESEARCH")
   TOTAL=$(jq '.competitors | length' "$RESEARCH")
   (( TOTAL > 0 )) || warn "no competitor pages: add URLs to competitors.txt for intent and gap analysis"
@@ -369,6 +415,25 @@ keywords)
   jq -e --arg p "$PRIMARY" 'all(.secondary_keywords[]; . != $p)' "$KEYWORDS" > /dev/null \
     || fail "the primary keyword is repeated in secondary_keywords"
 
+  # Rule 3 lets the rationale describe the figures in words, so the description
+  # has to be true. A live run justified a 600-volume term with "has the highest
+  # volume" while the file held one at 3400, and nothing caught it: the figures
+  # rule only looks for digits. Only a sentence that names the chosen keyword
+  # counts, so "the highest volume term is too competitive" stays legal.
+  RATIONALE=$(jq -r '.rationale // ""' "$KEYWORDS")
+  for pair in "volume:highest( estimated| search)? volume|most( estimated| search)? volume|highest demand|most searched" \
+              "impressions:most impressions|highest impressions" \
+              "clicks:most clicks|highest clicks"; do
+    field="${pair%%:*}"; pattern="${pair#*:}"
+    max=$(jq --arg f "$field" '[.keywords[]? | .[$f] // empty] | max // 0' "$RESEARCH")
+    (( $(printf '%.0f' "$max") > 0 )) || continue
+    mine=$(jq -r --arg p "$PRIMARY" --arg f "$field" \
+             'first(.keywords[]? | select(.keyword == $p) | .[$f]) // 0' "$RESEARCH")
+    (( $(printf '%.0f' "$mine") < $(printf '%.0f' "$max") )) || continue
+    claim=$(tr '.!?' '\n' <<< "$RATIONALE" | grep -iE "$pattern" | grep -iF "$PRIMARY" | head -1 | sed 's/^ *//' || true)
+    [[ -z "$claim" ]] || fail "the rationale claims a superlative the research contradicts: \"$claim\" ($PRIMARY has $field $mine, the highest in the research is $max)"
+  done
+
   # Numbers the model restated instead of describing.
   RNUM=$(jq -r '[.keywords[]? | .volume, .difficulty, .traffic_potential, .clicks, .impressions, .position] | map(select(. != null)) | .[]' "$RESEARCH" | sort -u || true)
   if [[ -n "$RNUM" ]]; then
@@ -383,6 +448,34 @@ keywords)
     TITLE=$(jq -r '.existing_page.title // ""' "$RESEARCH")
     grep -qiF "$PRIMARY" <<< "$TITLE" || warn "the live page's title does not contain the chosen primary keyword, so this is a retarget: $TITLE"
   fi
+  ;;
+
+targets)
+  # The call to action is where a page invents a business or a retailer. A live
+  # run wrote "Canadian retailers like PetSmart or Pet Valu": PetSmart is a
+  # competitor URL in the research, Pet Valu is in none of it. Only names that
+  # look like brands are checked, meaning a multi-word capitalised name or a
+  # single word with a capital inside it, so "Canadian" and a sentence's first
+  # word are left alone.
+  TARGETS="${1:?targets stage file required}"; RESEARCH="${2:?research.json required}"
+  jq -e '(.cta | type == "string" and length > 0)' "$TARGETS" > /dev/null 2>&1 \
+    || fail "the targets stage has no cta"
+  (( FAILS == 0 )) || exit 1
+  HAYSTACK=$(jq -r '
+    [ (.keywords[]? | .keyword, .parent_topic),
+      (.competitors[]? | .url, .title, (.headings[]? | .text)),
+      .existing_page.title, .existing_page.url, (.existing_page.headings[]? | .text) ]
+    | map(select(. != null)) | join(" | ") | ascii_downcase' "$RESEARCH")
+  CTA=$(jq -r '.cta' "$TARGETS")
+  # Drop each sentence's first word before looking for capitals, so "Check" and
+  # "Measure" are not read as names.
+  NAMES=$(sed -E 's/([.!?]) +/\1\n/g' <<< "$CTA" | sed -E 's/^[[:space:]]*[A-Z][a-zA-Z0-9]*//' \
+          | grep -oE '[A-Z][a-zA-Z0-9]*([ -][A-Z][a-zA-Z0-9]+)+|[A-Z][a-z]+[A-Z][a-zA-Z0-9]*' | sort -u || true)
+  while read -r name; do
+    [[ -n "$name" ]] || continue
+    grep -qiF "$name" <<< "$HAYSTACK" \
+      || fail "the call to action names something the research does not contain: $name"
+  done <<< "$NAMES"
   ;;
 
 *) echo "unknown mode: $MODE" >&2; exit 2 ;;

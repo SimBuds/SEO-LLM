@@ -20,11 +20,21 @@ Router models carry no built-in system prompt. The wrapper sends `prompts/system
 
 1. **Local-first.** All generation hits `localhost:8080`.
 2. **CC is the harness.** No custom CLI, workflow engine, or storage layer. Just skills, prompts, Bash, and files.
-3. **Deterministic pipelines.** Stages run in order, with no autonomous loops in MVP.
-4. **Section-based generation.** Long articles are never produced in a single call.
-5. **Multi-pass quality.** Draft → rewrite → SEO/metadata.
-6. **SEO-centric.** Prompts ground in intent, semantic coverage, EEAT.
-7. **The output is a file, never a publication.** The pipeline writes briefs and
+3. **The local model generates, Claude Code audits.** Qwen does the volume work:
+   keyword choice, brief stages, outlines, drafts, rewrites, anything long or
+   repetitive. Claude Code's job is to read what came back against the research
+   and say what is wrong with it. The two are not interchangeable. A judgement
+   that needs reading ("does this rationale describe the data honestly", "does
+   this section promise something the brief cannot support") belongs to the
+   auditor, and a rule that can be decided by arithmetic or a lookup belongs in
+   `scripts/check.sh`. Putting judgement into a regex produces a check that is
+   wrong on real data, and putting arithmetic into a model call produces a result
+   that cannot be audited.
+4. **Deterministic pipelines.** Stages run in order, with no autonomous loops in MVP.
+5. **Section-based generation.** Long articles are never produced in a single call.
+6. **Multi-pass quality.** Draft → rewrite → SEO/metadata.
+7. **SEO-centric.** Prompts ground in intent, semantic coverage, EEAT.
+8. **The output is a file, never a publication.** The pipeline writes briefs and
    articles into this repo and stops there. Nothing is pushed into WordPress or
    any other CMS, and no stage publishes, submits or posts anything. The last
    step is always a person copying the result where they want it.

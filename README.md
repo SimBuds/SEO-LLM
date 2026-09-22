@@ -185,6 +185,26 @@ router: serving qwen
   saved to `research/<slug>/type.txt`. Answering `review` shapes the keyword
   choice and the brief's sections. Pressing enter records an empty answer, which
   keeps the generic behaviour and stops the question being asked again.
+- **Nothing needs a hand edit.** Every value the pipeline cannot derive is asked
+  for: the page purpose, the content type, your keyword suggestions, the facts
+  the page may state, the primary keyword to confirm or swap, and the word count.
+  Editing a file still works and is sometimes quicker, but it is no longer the
+  only way to change a decision.
+- **The facts the page may state are asked before the brief stages** and written
+  to `briefs/_ingest/<slug>.txt`, the same file `/seo-ingest` produces, so the
+  facts stage reads them as it always has. Typing nothing is a real answer and
+  the page stays general. If you then say the page recommends specific products,
+  it says plainly that the sections will name none and offers the question again,
+  because that combination is what produces a picks section with no picks in it.
+- **The word count is asked at the merge**, defaulting to the competitor median
+  it has just computed. A number between 300 and 6000 replaces it and the brief
+  is re-checked.
+- **The keyword choice is confirmed at the menu**: accept it, swap the primary for
+  another researched term from a numbered list, or reseed. A swap moves the old
+  primary into the secondaries, records in the rationale that a human chose it,
+  and re-runs the same check, so a hand-picked keyword is verified exactly like a
+  generated one. The swap is offered on a failed check too, because an invented or
+  merged keyword is fixed by choosing a real one, not by reseeding.
 - **Your own keyword suggestions are asked for once per page**, after the
   competitor research and before the keyword choice, and saved to
   `research/<slug>/suggested.txt`, one per line. The model may return a
@@ -211,7 +231,9 @@ router: serving qwen
   finished brief it will take you to `final.md` in one keypress.
 - **The review stage** lists the claims the fact checker flagged but could not
   safely fix, which are still in the article, alongside the brief target and the
-  draft and final word counts.
+  draft and final word counts. When the brief carries no facts it says so instead
+  of reporting a clean pass, because a verifier with nothing to compare against
+  has not verified anything.
 - `RESEARCH_DIR`, `BRIEFS_DIR` and `OUTPUTS_DIR` relocate the whole tree, which
   is how a test run stays out of the real directories. `draft_sections.sh` and
   `rewrite_sections.sh` read `OUTPUTS_DIR` too, so a whole run can land in a
@@ -280,6 +302,14 @@ hand works exactly the same, and is how you add to a page later.
   dropped and the volume the cut landed on, and `check.sh research` WARNs about it,
   so nobody reads the list as the whole file. Measured on a real export:
   2782 rows in, the top 150 kept at volume 10 and above, `research.json` 31 KB.
+- **Page furniture is dropped from competitor headings.** Whole-string matches for
+  `About`, `Help`, `Services`, `Stores`, `Skip to`, `One Comment`, `Follow via
+  Email` and the like never reach `research.json`, because those headings sit in
+  the haystack that `check.sh stage` traces brief sections against, and a section
+  invented out of thin air could trace to "Help" and pass. The match is whole
+  string, so "How to help your cat drink" survives. `research.json` records
+  `headings_dropped` and `check.sh research` WARNs with the count. Measured on a
+  live run: 6 of 16 collected headings were furniture.
 - **An export that cannot be read stops the run** (exit 4), names the file, and
   writes nothing, rather than leaving a `research.json` with no keywords in it that
   looks like a topic with no data. An export with no keyword column still exits 3
@@ -320,6 +350,15 @@ an invented one does, because "checklist for technical seo" is a different query
 from "technical seo checklist". The prompt also forbids restating the research
 figures, so volumes and difficulties stay in `research.json` where they can be
 audited, and a repeated figure is a WARN.
+
+Two claims the checker makes about the reasoning itself. A figure repeated from
+the research is a WARN, because rule 3 says describe the numbers rather than
+restate them. A **superlative that the research contradicts is a FAIL**: a
+sentence naming the chosen keyword and claiming "the highest volume" or "the most
+impressions" is compared against the figures, and fails when the term is not the
+maximum. A live run justified a 600-volume term with "has the highest volume"
+while the file held one at 3400. A superlative about some other term
+("the highest volume term is too competitive") is left alone.
 
 The word-count target is not set here. It comes from the competitor word counts
 at the brief stage.
@@ -436,7 +475,7 @@ and an outline missing something real still fails its check.
 `/seo-draft` runs `scripts/draft_sections.sh <brief.json>`, which turns the outline into parts and drafts each with its own call:
 
 - **Parts.** `00-intro` (no heading, since the H1 is added at stitch time), then one part per H2 in outline order. The FAQ uses `prompts/section.md`, and the Conclusion uses `prompts/conclusion.md`, which ends on the brief's CTA.
-- **Budget.** The draft aims at 135% of `word_count` because the rewrite pass and its re-verification cut 20 to 35% (`DRAFT_FACTOR` overrides). A lower factor for short pages left a thin-facts page 28% short, so the factor is the same at every length. A page that keeps some drafted text can overshoot, which only warns. Of that total: intro about 8%, conclusion about 6%, FAQ 60 words per question (at most 20%), and the rest split across topic sections by their H3 count. Each prompt asks for 90 to 110% of its budget.
+- **Budget.** The draft aims at 120% of `word_count`, lowered from 135% on 2026-09-21 after two runs measured the rewrite cutting 13% and 17.5% rather than the 20 to 35% the old factor assumed, which put an article 39% over its target (`DRAFT_FACTOR` overrides). A lower factor for short pages left a thin-facts page 28% short, so the factor is the same at every length. A page that keeps some drafted text can overshoot, which only warns. Of that total: intro about 8%, conclusion about 6%, FAQ 60 words per question (at most 20%), and the rest split across topic sections by their H3 count. Each prompt asks for 90 to 110% of its budget.
 - **Keywords.** Each primary keyword keeps its cue in only the first two parts that list it (the intro counts as one use of the first keyword), and the FAQ gets none, because the model stuffs cues into its questions.
 - **Repairs.** After each call the script puts the outline's heading wording back when the heading structure matches, and strips bold. Then `check.sh section` runs. A failure is retried once with seed 2, and a second failure is saved as `.ERROR.md` and stops the run.
 - **Fact verification.** Each passing part gets a second call (`prompts/verify.md`, schema-constrained, temperature 0.1) that lists sentences the facts do not support, typed `invented`, `strengthened`, or `contradiction`, each with a replacement. The script applies replacements as literal swaps and rejects any that is not found verbatim, touches the CTA sentence, brings in words absent from the sentence and the facts (compared by first four letters), or, for `strengthened`, drops over half the sentence. Everything is logged in `sections/NN-<heading>.verify.json`. The original text stays in `.unverified.md`, and is restored if the verified part fails its check. Rejected issues remain in the draft for review. `VERIFY_MODEL=gemma` runs the verifier on Gemma instead. On the About test page the two flagged nearly the same sentences at the same speed.
@@ -448,7 +487,7 @@ Every part sees the brief's audience, tone, facts, and the outline's headings, s
 
 `/seo-rewrite` runs `scripts/rewrite_sections.sh <brief.json>` after `/seo-draft`. Each part is edited in order with `prompts/rewrite.md`: fix pasted keyword phrases, cut filler and sentences that repeat earlier parts, vary sentence openings, and fix the verifier's rejected issues for that part, which are passed in. Each call sees the parts already edited.
 
-The edit is checked against its input with `check.sh rewrite`: identical headings, 50 to 120% of the length (cutting filler shortens parts, and growth is where new claims come from), no call to action added to a part that lacked it, no numbers absent from the input and the facts, no more absolute-wording sentences than before, and the CTA sentence kept. A failure is retried with seed 2, and a second failure keeps the drafted part with a WARN, because the rewrite is polish and never blocks the article. Each accepted edit then goes through the same fact verification as the draft (`verify_part` in `scripts/lib_parts.sh`), logged as `rewrite/NN-<heading>.verify.json`, because an edit can reword a claim into one the facts do not support. `REWRITE_MODEL=gemma` switches the model.
+The edit is checked against its input with `check.sh rewrite`: identical headings, no keyword used more often than the draft used it (the pass exists partly to fix pasted keyword phrases, and a live run took the primary keyword from 5 uses to 9), 50 to 120% of the length (cutting filler shortens parts, and growth is where new claims come from), no call to action added to a part that lacked it, no numbers absent from the input and the facts, no more absolute-wording sentences than before, and the CTA sentence kept. A failure is retried with seed 2, and a second failure keeps the drafted part with a WARN, because the rewrite is polish and never blocks the article. Each accepted edit then goes through the same fact verification as the draft (`verify_part` in `scripts/lib_parts.sh`), logged as `rewrite/NN-<heading>.verify.json`, because an edit can reword a claim into one the facts do not support. `REWRITE_MODEL=gemma` switches the model.
 
 ## Checks
 
@@ -456,15 +495,30 @@ The edit is checked against its input with `check.sh rewrite`: identical heading
 
 | Mode | FAIL (regenerate or fix) | WARN (look at it) |
 | --- | --- | --- |
-| `brief <brief.json> [source.txt]` | schema mismatch | CTA mentions on-page UI, single-word or page-name keywords, empty facts, fact numbers absent from the source |
+| `brief <brief.json> [source.txt]` | schema mismatch | CTA mentions on-page UI, single-word or page-name keywords, empty facts, empty facts against a heading promising product picks, fact numbers absent from the source |
 | `outline <outline.md> <brief.json>` | not exactly one H1, missing FAQ/Conclusion, any body text, an H2 without an Intent line | section or FAQ counts outside the size table, H3s under Conclusion, lowercase keyword pasted into a heading |
-| `section <part.md> <block.md or -> <words> <brief.json>` | headings differ from the block (or any heading in the intro), guidance lines or code fence left in, CTA missing from the conclusion | words outside 60 to 125% of the budget, bolded keyword |
-| `rewrite <new.md> <old.md> <brief.json>` | headings changed, length outside 50 to 120%, CTA added where there was none, numbers absent from the input and facts, more absolute-wording sentences, CTA sentence lost | bold left in |
+| `section <part.md> <block.md or -> <words> <brief.json>` | headings differ from the block (or any heading in the intro), guidance lines or code fence left in, CTA missing from the conclusion, more than 140% of the word budget | words outside 60 to 125% of the budget, bolded keyword |
+| `rewrite <new.md> <old.md> <brief.json>` | headings changed, length outside 50 to 120%, CTA added where there was none, numbers absent from the input and facts, more absolute-wording sentences, CTA sentence lost, a keyword used more often than the draft used it | bold left in |
+| `targets <targets-stage.json> <research.json>` | the call to action names a brand or business absent from the research | |
 | `research <research.json>` | the file does not match the expected shape | no keywords, no volume column anywhere, no competitors, fewer than 3 fetched, a competitor that failed, an existing page with no title or no meta description |
-| `keywords <keywords.json> <research.json>` | the file does not match the expected shape, a keyword absent from the research, the primary keyword repeated as a secondary | no questions, fewer than 2 must-cover subtopics, research figures repeated in the reasoning, a live page whose title does not contain the chosen keyword |
-| `draft <draft.md> <outline.md> <brief.json> [percent]` (`draft` for `draft.md`) | H1/H2 differ from the outline, outline guidance lines left in | length outside ±15%, CTA missing from Conclusion, a keyword used more than twice, bolded keywords, numbers not in the facts or outline, sentences with absolute wording (all, every, guaranteed…) |
+| `keywords <keywords.json> <research.json> [suggested.txt]` | the file does not match the expected shape, a keyword absent from the research and from your suggestions, the primary keyword repeated as a secondary, a superlative in the rationale the figures contradict | no questions, fewer than 2 must-cover subtopics, research figures repeated in the reasoning, a live page whose title does not contain the chosen keyword |
+| `draft <draft.md> <outline.md> <brief.json> [percent]` (`draft` for `draft.md`) | H1/H2 differ from the outline, outline guidance lines left in, numbers absent from the facts and the outline | length outside ±15%, CTA missing from Conclusion, a keyword used more than twice, bolded keywords, numbers not in the facts or outline, sentences with absolute wording (all, every, guaranteed…) |
 
-The checks catch structure and invented digits, not invented prose. The skills therefore also ask Claude Code to audit facts against the source (ingest) or the brief's `facts` (draft) and report anything added or strengthened.
+The checks catch structure and invented digits, not invented prose, and that
+split is deliberate. **The local model generates, Claude Code audits**
+(PLAN.md principle 3). A rule that arithmetic or a lookup can settle lives in
+`check.sh`: is this keyword in the research, does the term claimed to have the
+most volume actually have it, is this number in the facts, did the edit use a
+phrase more often than the draft did. A judgement that needs reading stays with
+the auditor, and every `/seo-*` skill now names its own: whether a rationale
+argues honestly from the data, whether a section's cited source really supports
+it, whether a call to action promises something the business does not offer,
+whether a fact was strengthened on the way into the page.
+
+Where a check straddles the line it is a WARN, not a FAIL, and it exists to send
+the auditor somewhere rather than to decide: the "this heading promises product
+picks" warning is one of those, and it had to be widened twice against real
+headings, which is exactly what a regex doing a human's job looks like.
 
 ## Where files land
 

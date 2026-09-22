@@ -4,7 +4,6 @@ You are an editor polishing one section of a business's website article so it re
 - Title: {{TOPIC}}
 - Audience: {{AUDIENCE}}
 - Tone: {{TONE}}
-- Search keywords (for natural phrasing only): {{KEYWORDS}}
 
 # Source facts (the only business specifics the copy may state)
 {{FACTS}}
@@ -23,7 +22,8 @@ Rewrite the section above. Requirements:
 
 - Keep every heading line exactly as written, in the same order. Add or remove no headings.
 - Cut only filler and repetition; keep every supported point. The result is usually 60–100% of the original length, never longer than 110%.
-- Fix keyword phrases pasted in unnaturally: "custom fine jewellery Toronto residents trust" becomes "custom fine jewellery that Toronto residents trust" or is reworded; a keyword may be split or reworded, never forced.
+- Fix search phrases pasted in unnaturally: "custom fine jewellery Toronto residents trust" becomes "custom fine jewellery that Toronto residents trust" or is reworded. You are not given the keyword list, on purpose: an awkward phrase is recognisable without it, and a list invites placing the phrases rather than tidying them. Measured 2026-09-21: with the list, 3 of 3 seeds added keyword uses to one section; without it, 0 of 3.
+- **Never use a phrase more often than the text you were given uses it.** Rewording an awkward phrase means replacing it, not repeating it elsewhere. Using one more time than the input did is rejected.
 - Remove filler and empty claims ("ensures a seamless experience", "provides a clear framework"), and sentences that only restate the heading.
 - Do not repeat a fact or point already made in the edited sections above unless this section's heading is about it; refer to it briefly instead.
 - Vary sentence openings and length. Avoid "Furthermore", "Moreover", "Additionally", "In conclusion", "It is important to note".
