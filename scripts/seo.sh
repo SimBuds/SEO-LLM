@@ -677,10 +677,16 @@ intake_inputs() { # the keyword exports and the competitor URLs
     while IFS= read -r -p "> " line; do
       [[ -z "${line//[[:space:]]/}" ]] && break
       path="${line/#\~/$HOME}"
-      if [[ -r "$path" && -f "$path" ]]; then
-        cp "$path" "$dir/inputs/" && say "  copied $(basename "$path") into $dir/inputs/"
-      else
+      if [[ ! -r "$path" || ! -f "$path" ]]; then
         err "  not a readable file, so nothing was copied: $line"
+      elif [[ "$path" -ef "$dir/inputs/$(basename "$path")" ]]; then
+        # Naming a file that already sits in inputs/ is not an error, and cp
+        # would refuse it with "are the same file".
+        say "  already in $dir/inputs/: $(basename "$path")"
+      elif cp "$path" "$dir/inputs/"; then
+        say "  copied $(basename "$path") into $dir/inputs/"
+      else
+        err "  could not copy $line, see the message above"
       fi
     done
   fi
