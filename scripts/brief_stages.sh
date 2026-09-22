@@ -80,7 +80,8 @@ mkdir -p "$STAGE_DIR"
 if [[ -n "$TYPE" ]]; then
   if [[ -n "$RECORDED_TYPE" && "$RECORDED_TYPE" != "$TYPE" ]]; then
     echo "$SLUG is already recorded as $RECORDED_TYPE, not $TYPE." >&2
-    echo "A brief keeps one type. Start a new slug, or delete $TYPE_FILE and redo every stage." >&2
+    echo "A brief keeps one type. Change it with 'e' at the menu, which clears the" >&2
+    echo "stages written from the old type, or start a new slug." >&2
     exit 1
   fi
   printf '%s\n' "$TYPE" > "$TYPE_FILE"

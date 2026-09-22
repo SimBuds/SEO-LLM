@@ -94,6 +94,7 @@ canonical_header() { # canonical_header <tsv-header-line>
         else if (h == "ctr") $i = "ctr"
         else if (h == "parent topic") $i = "parent_topic"
         else if (h == "intent" || h == "search intent") $i = "intent"
+        else if (h == "country" || h == "market" || h == "location") $i = "country"
         else $i = ""
         if ($i != "") { if ($i in seen) $i = ""; else seen[$i] = 1 }
       }
@@ -131,7 +132,8 @@ export_to_json() { # export_to_json <file>
           | from_entries)
     | map(select(.keyword != null and .keyword != ""))
     | map(with_entries(
-        if .key == "keyword" or .key == "parent_topic" or .key == "intent" then .
+        if .key == "keyword" or .key == "parent_topic" or .key == "intent"
+           or .key == "country" then .
         else .value |= (gsub("[,$%\\s]"; "") | if . == "" then null else (tonumber? // null) end)
         end))
     | map(. + {sources: [$src]})'
@@ -158,7 +160,7 @@ if compgen -G "$DIR/inputs/*" > /dev/null; then
     # and every file that mentioned the keyword is listed in sources.
     jq -n --slurpfile a "$KW_FILE" --slurpfile b "$ROWS_FILE" '
       ($a[0] + $b[0])
-      | group_by(.keyword | ascii_downcase)
+      | group_by([(.keyword | ascii_downcase), (.country // "" | ascii_downcase)])
       | map((map(.sources) | add | unique) as $srcs
             | reduce .[] as $r ({}; $r + with_entries(select(.value != null)))
             | .sources = $srcs)' > "$KW_FILE.new" \

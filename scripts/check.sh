@@ -293,6 +293,13 @@ research)
       warn "no keyword carries impressions, clicks or a volume: the choice rests on the competitor pages"
     fi
   fi
+  # Two markets in one file is not an error, but every later stage compares
+  # volumes as if they were comparable, and a US figure beside a Canadian one is
+  # not. The rows no longer merge, so the reader has to be told they are both here.
+  MARKETS=$(jq -r '[.keywords[]? | .country // empty | ascii_downcase] | unique | join(", ")' "$RESEARCH")
+  if [[ -n "$MARKETS" && "$MARKETS" == *,* ]]; then
+    warn "the keywords come from more than one market ($MARKETS): their volumes are not comparable, and the same term appears once per market"
+  fi
   DROPPED=$(jq -r '.headings_dropped // 0' "$RESEARCH")
   (( DROPPED == 0 )) || warn "$DROPPED competitor heading(s) were dropped as page furniture (About, Help, comments and the like), so they cannot be mistaken for subtopics"
   OK=$(jq '[.competitors[] | select(.fetched)] | length' "$RESEARCH")

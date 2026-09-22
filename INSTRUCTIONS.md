@@ -127,7 +127,7 @@ Editing a stage file is usually better than rerunning it, because a rerun is a f
    - It also can't add new words, and a fix to an overstated sentence can't drop more than half of it.
    - Findings are logged in `sections/NN-<heading>.verify.json`, and the text before the pass is kept in `.unverified.md`. If the fixed part fails its check, that text is restored.
    - A fact-check call that fails or times out leaves the part unverified with a warning. Rerunning retries it.
-7. **Output:** the parts are joined into `draft.md`. Rerunning skips parts that already passed. A newer outline or `--fresh` redoes everything.
+7. **Output:** the parts are joined into `draft.md`. Rerunning skips parts that already passed. A strictly newer outline or `--fresh` redoes everything, and `DRAFT_SEED` moves the seed pair the loop tries. From the menu, `p` redoes one part at a seed you choose and leaves the rest alone.
 8. **`check.sh draft … draft`:**
    - **Fails** if the headings don't match the outline or outline notes are left in.
    - **Warns** on length, keyword overuse, bold, numbers that aren't in the facts, and absolute wording ("all", "every", "guaranteed"…).
@@ -179,8 +179,9 @@ stages so you read all four, and stops at the first failure. From a
 finished brief, one `a` takes you through the outline, the draft, the rewrite
 and the review.
 
-The menu asks the page purpose, the content type and your suggested keywords once
-each and reuses them, checks the router before any model call, offers a reseed when
+The menu asks the page purpose, the content type, your suggested keywords and the
+facts the page may state once each and reuses them, with `e` to change any of them
+later and clear whatever was built on the old answer. It checks the router before any model call, offers a reseed when
 a check fails rather than retrying behind your back, and always asks before
 replacing an artifact.
 

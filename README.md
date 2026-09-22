@@ -233,6 +233,21 @@ router: serving qwen
   to type or place something (the page check and the research collection), stops
   after each brief stage so you read it, and stops at the first failure. From a
   finished brief it will take you to `final.md` in one keypress.
+- **A recorded answer can be changed.** `e` lists what the page has on file, the
+  purpose, the content type, your suggested keywords, the facts and your site
+  URL, with each value beside it. Picking one says what changing it invalidates,
+  re-asks the question through the same prompt that asked it first, and offers to
+  delete the artifacts built on the old answer. Changing the content type clears
+  the brief stages, because `brief_stages.sh` refuses a type that disagrees with
+  the stages already written, and a brief half-shaped as one thing and half as
+  another is worse than either.
+- **One drafted part can be redone on its own.** With a draft on disk the menu
+  offers `p`: it lists the parts with their word counts, takes a number and a
+  seed (3 by default, because the same seed returns the same text), deletes that
+  part and its verification sidecars, and runs the existing draft loop, which
+  skips every part that already passes and re-stitches `draft.md`. That is the
+  answer to a section carrying an invented figure or reading badly: redo the one
+  part rather than the whole article, and never edit the markdown by hand.
 - **The review stage** lists the claims the fact checker flagged but could not
   safely fix, which are still in the article, alongside the brief target and the
   draft and final word counts. When the brief carries no facts it says so instead
@@ -298,6 +313,13 @@ hand works exactly the same, and is how you add to a page later.
   numbers. Rows are merged by keyword, and each keyword lists the files it came
   from. An export with no recognizable keyword column exits 3 and prints the
   columns it saw rather than writing empty rows.
+- **A keyword's market is part of its identity.** `Country`, `Market` or
+  `Location` is read as `country`, and rows are merged by keyword *and* market, so
+  the same term exported for Canada and for the United States stays two rows with
+  its own volume in each. Merging them on the keyword alone let one figure win
+  silently, and the keyword prompt's whole Case B is a comparison of volumes.
+  `check.sh research` WARNs when a file holds more than one market, because the
+  numbers in it are then not comparable with each other.
 - **The keyword list is capped at 150** (`MAX_KEYWORDS`, and `0` keeps every row),
   taken from the head of the volume sort. A full Ahrefs "matching terms" export is
   thousands of rows and several hundred KB, which is far past the 32768-token
@@ -483,7 +505,7 @@ and an outline missing something real still fails its check.
 - **Keywords.** Each primary keyword keeps its cue in only the first two parts that list it (the intro counts as one use of the first keyword), and the FAQ gets none, because the model stuffs cues into its questions.
 - **Repairs.** After each call the script puts the outline's heading wording back when the heading structure matches, and strips bold. Then `check.sh section` runs. A failure is retried once with seed 2, and a second failure is saved as `.ERROR.md` and stops the run.
 - **Fact verification.** Each passing part gets a second call (`prompts/verify.md`, schema-constrained, temperature 0.1) that lists sentences the facts do not support, typed `invented`, `strengthened`, or `contradiction`, each with a replacement. The script applies replacements as literal swaps and rejects any that is not found verbatim, touches the CTA sentence, brings in words absent from the sentence and the facts (compared by first four letters), or, for `strengthened`, drops over half the sentence. Everything is logged in `sections/NN-<heading>.verify.json`. The original text stays in `.unverified.md`, and is restored if the verified part fails its check. Rejected issues remain in the draft for review. `VERIFY_MODEL=gemma` runs the verifier on Gemma instead. On the About test page the two flagged nearly the same sentences at the same speed.
-- **Resume.** Rerunning skips parts that exist and pass. Saved parts older than `outline.md` are discarded, as is everything with `--fresh`.
+- **Resume.** Rerunning skips parts that exist and pass. Parts are discarded when `outline.md` is strictly newer than them, and by `--fresh`. Strictly, because the old test also fired when a part and the outline shared a timestamp to the second, which discarded a whole draft after a file copy. `DRAFT_SEED` moves the seed pair the loop tries, which is how the menu's `p` redraws one part.
 
 Every part sees the brief's audience, tone, facts, and the outline's headings, so it knows what the other sections cover without repeating them.
 

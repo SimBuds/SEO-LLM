@@ -204,8 +204,11 @@ render_menu() {
     printf '  %s%d [%-7s] %-18s %s%s%s\n' "$colour" "$i" "$STATE" "$label" "$DETAIL" "$mark" "$RESET"
     i=$((i + 1))
   done
-  printf '\n  %sa%s run all ready stages   %ss%s switch page   %sq%s quit\n' \
+  printf '\n  %sa%s run all ready stages   %ss%s switch page   %sq%s quit' \
     "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET"
+  [[ -d "$OUTPUTS/$SLUG/sections" ]] && printf '   %sp%s redo one drafted part' "$BOLD" "$RESET"
+  [[ -n "$(revise_targets)" ]] && printf '   %se%s change a recorded answer' "$BOLD" "$RESET"
+  printf '\n' 
   if [[ "$BRIEF_ONLY" == 1 ]]; then
     printf '  %sbrief-only mode: the outline, draft and rewrite stages are hidden. Unset SEO_BRIEF_ONLY for all nine.%s\n' "$DIM" "$RESET"
   fi
@@ -647,6 +650,41 @@ action_draft() {
   run_check draft "$out/draft.md" "$out/outline.md" "$BRIEFS/$SLUG.json" draft
 }
 
+# One drafted part, redone at a fresh seed. The draft loop already regenerates a
+# part whose file is missing and re-stitches draft.md, so this deletes one part
+# and runs that loop. The seed has to move: the same seed returns the same text.
+action_redo_part() {
+  need_router || return 1
+  local out="$OUTPUTS/$SLUG" sec
+  sec="$out/sections"
+  [[ -d "$sec" ]] || { warn "no drafted parts yet: run the draft stage first."; return 0; }
+  local -a parts=()
+  mapfile -t parts < <(find "$sec" -maxdepth 1 -name '*.md' \
+    ! -name '*.block.md' ! -name '*.unverified.md' ! -name '*.ERROR.md' -printf '%f\n' | sort)
+  (( ${#parts[@]} )) || { warn "no drafted parts yet: run the draft stage first."; return 0; }
+  say ""
+  say "${BOLD}Drafted parts${RESET}"
+  local i=1 p
+  for p in "${parts[@]}"; do
+    printf '  %2d  %-46s %s words\n' "$i" "${p%.md}" "$(grep -v '^#' "$sec/$p" | wc -w)"
+    i=$((i + 1))
+  done
+  local n
+  read -r -p "Redo which part? (number, or enter to go back) " n
+  [[ "$n" =~ ^[0-9]+$ ]] && (( n >= 1 && n <= ${#parts[@]} )) || { say "kept"; return 0; }
+  local name="${parts[$((n - 1))]%.md}"
+  local seed
+  read -r -p "Seed to draft it at [3]: " seed
+  [[ "$seed" =~ ^[0-9]+$ ]] || seed=3
+  say "redoing $name at seed $seed; every other part is left alone."
+  rm -f "$sec/$name.md" "$sec/$name.verify.json" "$sec/$name.unverified.md" "$sec/$name.verify.prompt.txt"
+  DRAFT_SEED="$seed" bash "$ROOT/scripts/draft_sections.sh" "$BRIEFS/$SLUG.json" || {
+    err "the redraft stopped, see the message above."
+    return 1
+  }
+  run_check draft "$out/draft.md" "$out/outline.md" "$BRIEFS/$SLUG.json" draft
+}
+
 action_rewrite() {
   need_router || return 1
   local out="$OUTPUTS/$SLUG" fresh=""
@@ -691,6 +729,77 @@ action_review() {
   say ""
   say "${BOLD}Read it:${RESET} $out/final.md"
   say "Then add what no model can: first-hand detail, original data, a named author."
+}
+
+# Every recorded answer is asked once and reused, which is what keeps a brief
+# coherent. Changing one therefore has to say what it invalidates and offer to
+# clear it, because a purpose changed under four written stages is worse than
+# either answer on its own.
+revise_targets() { # prints "label|file|what it invalidates" per recorded answer
+  local d="$RESEARCH/$SLUG"
+  [[ -r "$d/brief-stages/purpose.txt" ]] && printf 'page purpose|%s|the four brief stages and the brief\n' "$d/brief-stages/purpose.txt"
+  [[ -r "$d/type.txt" ]]                 && printf 'content type|%s|the four brief stages and the brief\n' "$d/type.txt"
+  [[ -r "$d/suggested.txt" ]]            && printf 'suggested keywords|%s|the keyword choice\n' "$d/suggested.txt"
+  [[ -r "$BRIEFS/_ingest/$SLUG.txt" ]]   && printf 'facts this page may state|%s|the facts stage and the brief\n' "$BRIEFS/_ingest/$SLUG.txt"
+  [[ -r "$d/site.txt" ]]                 && printf 'your site URL|%s|nothing already written\n' "$d/site.txt"
+  return 0
+}
+
+action_revise() {
+  local -a rows=()
+  mapfile -t rows < <(revise_targets)
+  (( ${#rows[@]} )) || { warn "nothing recorded yet for this page."; return 0; }
+  say ""
+  say "${BOLD}Recorded answers${RESET}"
+  local i=1 row label file value
+  for row in "${rows[@]}"; do
+    label="${row%%|*}"; file="${row#*|}"; file="${file%%|*}"
+    value=$(tr '\n' ' ' < "$file" | cut -c1-58)
+    [[ -n "${value// /}" ]] || value="${DIM}(recorded as none)${RESET}"
+    printf '  %d  %-28s %s\n' "$i" "$label" "$value"
+    i=$((i + 1))
+  done
+  local n
+  read -r -p "Change which answer? (number, or enter to go back) " n
+  [[ "$n" =~ ^[0-9]+$ ]] && (( n >= 1 && n <= ${#rows[@]} )) || { say "kept"; return 0; }
+  row="${rows[$((n - 1))]}"
+  label="${row%%|*}"; file="${row#*|}"; file="${file%%|*}"
+  local invalidates="${row##*|}"
+  say ""
+  say "Changing the $label invalidates $invalidates."
+  read -r -p "Change it? [y/N] " yn
+  [[ "$yn" == [yY]* ]] || { say "kept"; return 0; }
+  rm -f "$file"
+  case "$label" in
+    "page purpose")               need_purpose || return 1 ;;
+    "content type")               need_type || return 1 ;;
+    "suggested keywords")         need_suggested || return 1 ;;
+    "facts this page may state")  need_facts || return 1 ;;
+    "your site URL")
+      local site
+      read -r -p "Site URL (blank to leave it unset): " site
+      [[ -n "$site" ]] && printf '%s\n' "$site" > "$file" && say "wrote $file"
+      return 0 ;;
+  esac
+  # The stages that were built on the old answer are now inconsistent with it.
+  # brief_stages.sh refuses outright when the type disagrees, so clearing them is
+  # not tidiness, it is what makes the next run possible.
+  local n_stages; n_stages=$(stage_count_brief_stages)
+  if [[ "$invalidates" == *"brief stages"* ]] && (( n_stages > 0 )); then
+    say ""
+    say "$n_stages brief stage(s) were written from the old answer."
+    read -r -p "Delete them so the next run rebuilds from the new one? [Y/n] " yn
+    if [[ "$yn" != [nN]* ]]; then
+      rm -f "$RESEARCH/$SLUG"/brief-stages/0[1-9]-*.json
+      say "brief stages cleared; the brief itself is left for you to replace at the merge."
+    else
+      warn "kept, and the next brief run may refuse a type that disagrees with the stages."
+    fi
+  fi
+  if [[ "$invalidates" == *"keyword choice"* && -r "$RESEARCH/$SLUG/keywords.json" ]]; then
+    say ""
+    warn "keywords.json was chosen with the old suggestions. Rerun the keyword stage to use the new ones."
+  fi
 }
 
 # Stages that need you to type or place something, so run_all stops before them,
@@ -896,6 +1005,8 @@ while true; do
     # Switching pages re-runs the intake, because the page switched to may be new.
     s|S) PAGE_IS_LIVE=""; pick_slug || exit 0; intake ;;
     a|A) run_all; read -r -p "Press enter for the menu. " _ ;;
+    p|P) action_redo_part; read -r -p "Press enter for the menu. " _ ;;
+    e|E) action_revise; read -r -p "Press enter for the menu. " _ ;;
     "")  ;;
     [1-9])
       idx=$((choice - 1))

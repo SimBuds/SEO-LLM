@@ -6,7 +6,8 @@
 # part's .prompt.txt, then stitches them into outputs/<slug>/draft.md.
 #
 # Each part is one llm_call.sh call, checked with `check.sh section`. A failed
-# check is retried once with seed 2; a second failure is saved as
+# check is retried once at the next seed (DRAFT_SEED, default 1, then +1); a
+# second failure is saved as
 # NN-<heading>.ERROR.md and the script stops with exit 1. Re-running skips
 # parts that already exist and pass, so a stopped run resumes where it failed.
 # --fresh, or an outline newer than the saved parts, discards them first.
@@ -32,7 +33,16 @@ SEC="$OUT/sections"
 [[ -r "$OUTLINE" ]] || { echo "no outline at $OUTLINE; run /seo-outline first" >&2; exit 2; }
 
 mkdir -p "$SEC"
-if [[ "$FRESH" == "--fresh" ]] || [[ -n "$(find "$SEC" -maxdepth 1 -name '*.md' ! -newer "$OUTLINE" -print -quit)" ]]; then
+# A part is stale when the outline is strictly newer than it. The old test was
+# "not newer than the outline", which is also true when the two share a mtime to
+# the second, so a copied or quickly rewritten tree discarded every part and
+# redrafted the lot. Found 2026-09-22 while testing a single-part redo.
+STALE=0
+for _p in "$SEC"/*.md; do
+  [[ -e "$_p" ]] || continue
+  if [[ "$OUTLINE" -nt "$_p" ]]; then STALE=1; break; fi
+done
+if [[ "$FRESH" == "--fresh" ]] || (( STALE )); then
   rm -f "$SEC"/*
 fi
 
@@ -119,8 +129,10 @@ write_part() {
               --set "PRIMARY_KEYWORD=$(jq -r '.keywords[0]' "$BRIEF")")
   [[ -n "$block" ]] && args+=(--set-file "SECTION=$block")
   bash "$ROOT/scripts/fill_prompt.sh" "$ROOT/prompts/$template" "${args[@]}" > "$prompt"
+  # DRAFT_SEED lets a deliberate redo resample: the same seed returns the same
+  # text, so redoing a part at seed 1 would hand back what was just rejected.
   local seed
-  for seed in 1 2; do
+  for seed in "${DRAFT_SEED:-1}" $(( ${DRAFT_SEED:-1} + 1 )); do
     bash "$ROOT/scripts/llm_call.sh" "$prompt" "$TEMPERATURE" "$seed" > "$out"
     [[ -n "$block" ]] && restore_headings "$block" "$out"
     unbold "$out"
