@@ -838,18 +838,32 @@ action_revise() {
   say "Changing the $label invalidates $invalidates."
   read -r -p "Change it? [y/N] " yn
   [[ "$yn" == [yY]* ]] || { say "kept"; return 0; }
-  rm -f "$file"
+  # The old answer is moved aside, not deleted: each need_* re-asks only when its
+  # file is missing, and a rejected answer (an unknown type, an empty purpose) has
+  # to leave the page as it was. Deleting first lost "guide" to a typed "podcast"
+  # and left the slug untyped under stages written as a guide (found by /verify,
+  # 2026-09-22).
+  mv "$file" "$file.prev"
+  local ok=0
   case "$label" in
-    "page purpose")               need_purpose || return 1 ;;
-    "content type")               need_type || return 1 ;;
-    "suggested keywords")         need_suggested || return 1 ;;
-    "facts this page may state")  need_facts || return 1 ;;
+    "page purpose")               need_purpose && ok=1 ;;
+    "content type")               need_type && ok=1 ;;
+    "suggested keywords")         need_suggested && ok=1 ;;
+    "facts this page may state")  need_facts && ok=1 ;;
     "your site URL")
+      # Blank deliberately unsets the site URL, so there is nothing to restore.
       local site
       read -r -p "Site URL (blank to leave it unset): " site
       [[ -n "$site" ]] && printf '%s\n' "$site" > "$file" && say "wrote $file"
+      rm -f "$file.prev"
       return 0 ;;
   esac
+  if (( ! ok )); then
+    mv "$file.prev" "$file"
+    warn "kept the previous answer, unchanged."
+    return 1
+  fi
+  rm -f "$file.prev"
   # The stages that were built on the old answer are now inconsistent with it.
   # brief_stages.sh refuses outright when the type disagrees, so clearing them is
   # not tidiness, it is what makes the next run possible.
