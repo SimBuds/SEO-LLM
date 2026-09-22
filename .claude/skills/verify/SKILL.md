@@ -17,8 +17,10 @@ export RESEARCH_DIR=$V/research BRIEFS_DIR=$V/briefs OUTPUTS_DIR=$V/outputs
 ```
 
 `RESEARCH_DIR`, `BRIEFS_DIR` and `OUTPUTS_DIR` isolate everything the menu writes,
-**except the fetch cache**, which `fetch_page.sh` keeps at `research/_cache` in the
-repo unless `FETCH_CACHE_DIR` is set too. Set it if the run must not touch the repo.
+including the fetch cache, which follows `RESEARCH_DIR` to `$V/research/_cache`. A
+fresh scratch tree therefore fetches from the network. To reuse cached pages
+without writing to the repo, copy `research/_cache` into it, or point
+`FETCH_CACHE_DIR` at a copy.
 
 ## Driving the menu
 

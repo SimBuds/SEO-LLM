@@ -137,6 +137,17 @@ stage_status() { # stage_status <stage-id>; sets STATE and DETAIL
         STATE="done"; DETAIL="$(wc -w < "$OUTPUTS/$SLUG/draft.md" | tr -d ' ') words"
         if [[ "$OUTPUTS/$SLUG/outline.md" -nt "$OUTPUTS/$SLUG/draft.md" ]]; then
           STATE="stale"; DETAIL="the outline changed after this was drafted"
+        else
+          # Staleness runs down the chain: a draft newer than a stale outline was
+          # still built from the old brief. Pairwise checks alone showed
+          # "[done] Draft" for an article whose brief no longer existed (2026-09-22).
+          local mine="$DETAIL"
+          stage_status outline
+          if [[ "$STATE" == "stale" ]]; then
+            DETAIL="the outline is stale, so this was built from an older brief"
+          else
+            STATE="done"; DETAIL="$mine"
+          fi
         fi
       elif [[ -r "$OUTPUTS/$SLUG/outline.md" ]]; then
         STATE="ready"
@@ -149,6 +160,14 @@ stage_status() { # stage_status <stage-id>; sets STATE and DETAIL
         STATE="done"; DETAIL="$(wc -w < "$OUTPUTS/$SLUG/final.md" | tr -d ' ') words"
         if [[ "$OUTPUTS/$SLUG/draft.md" -nt "$OUTPUTS/$SLUG/final.md" ]]; then
           STATE="stale"; DETAIL="the draft changed after this was edited"
+        else
+          local mine="$DETAIL"
+          stage_status draft
+          if [[ "$STATE" == "stale" ]]; then
+            DETAIL="the draft is stale, so this was edited from an older version"
+          else
+            STATE="done"; DETAIL="$mine"
+          fi
         fi
       elif [[ -r "$OUTPUTS/$SLUG/draft.md" ]]; then
         STATE="ready"
@@ -158,9 +177,12 @@ stage_status() { # stage_status <stage-id>; sets STATE and DETAIL
       ;;
     review)
       if [[ -r "$OUTPUTS/$SLUG/final.md" ]]; then
-        STATE="ready"
-        [[ "$OUTPUTS/$SLUG/draft.md" -nt "$OUTPUTS/$SLUG/final.md" ]] \
-          && DETAIL="final.md is older than the draft, so this reviews a superseded article"
+        stage_status rewrite
+        if [[ "$STATE" == "stale" ]]; then
+          STATE="stale"; DETAIL="final.md is stale, so this reviews a superseded article"
+        else
+          STATE="ready"; DETAIL=""
+        fi
       else
         DETAIL="needs final.md"
       fi
@@ -907,6 +929,7 @@ run_all() {
       say "Pick it from the menu when you are ready."
       return 0
     fi
+    local was="$STATE"
     say ""
     say "${BOLD}--- $label${RESET}"
     case "$id" in
@@ -919,6 +942,18 @@ run_all() {
       review)       action_review ;;
     esac || { err "stopped: $label did not finish."; return 1; }
     ran=$((ran + 1))
+    # A stale stage you chose to keep stays stale, and every later stage is
+    # stale because of it, so carrying on would only rebuild them from what you
+    # kept. Measured 2026-09-22: declining the outline went on to redraft.
+    if [[ "$was" == "stale" ]]; then
+      stage_status "$id"
+      if [[ "$STATE" == "stale" ]]; then
+        say ""
+        warn "stopped: you kept the stale $label, so the stages after it would be rebuilt from it."
+        say "Replace it, or pick a later stage from the menu to rebuild on purpose."
+        return 0
+      fi
+    fi
     if [[ "$STOP_AFTER" == *" $id "* ]]; then
       say ""
       warn "stopped after $label so you can read it. Choose a again to carry on."
@@ -1060,6 +1095,13 @@ pick_slug() {
 
 SLUG="${1:-}"
 
+# The slug is checked before the terminal test, so a piped run refuses a bad slug
+# too instead of rendering a menu for it and exiting 0 (found 2026-09-22).
+if [[ -n "$SLUG" ]] && ! valid_slug "$SLUG"; then
+  err "not a valid slug: $SLUG"
+  exit 2
+fi
+
 if [[ ! -t 0 ]]; then
   # Not a terminal: print the state once and leave, rather than looping on EOF.
   if [[ -z "$SLUG" ]]; then
@@ -1073,9 +1115,6 @@ fi
 if [[ -z "$SLUG" ]]; then
   ask_is_live
   pick_slug || exit 0
-elif ! valid_slug "$SLUG"; then
-  err "not a valid slug: $SLUG"
-  exit 2
 fi
 
 intake

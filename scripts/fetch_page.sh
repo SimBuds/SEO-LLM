@@ -8,7 +8,9 @@
 # Honors robots.txt for the requesting User-Agent, keeps a per-host delay, and
 # caches raw HTML so a rerun does not hit the host again. Env overrides:
 #   FETCH_UA         User-Agent (default SEO-LLM/1.0, no contact address)
-#   FETCH_CACHE_DIR  cache location (default research/_cache)
+#   FETCH_CACHE_DIR  cache location (default $RESEARCH_DIR/_cache, so a run with
+#                    RESEARCH_DIR pointed at scratch never reads or writes the
+#                    repo cache; research/_cache when neither is set)
 #   FETCH_CACHE_TTL  seconds a cached page stays fresh (default 86400)
 #   FETCH_DELAY      minimum seconds between requests to one host (default 2)
 #   FETCH_TIMEOUT    per-request timeout in seconds (default 20)
@@ -19,7 +21,7 @@
 set -euo pipefail
 
 UA="${FETCH_UA:-SEO-LLM/1.0}"
-CACHE_DIR="${FETCH_CACHE_DIR:-research/_cache}"
+CACHE_DIR="${FETCH_CACHE_DIR:-${RESEARCH_DIR:-research}/_cache}"
 CACHE_TTL="${FETCH_CACHE_TTL:-86400}"
 MIN_DELAY="${FETCH_DELAY:-2}"
 TIMEOUT="${FETCH_TIMEOUT:-20}"
@@ -133,7 +135,7 @@ flatten() { tr '\n\r\t' '   ' < "$1"; }
 # `set -o pipefail` an unmatched grep would otherwise end the run.
 tag_text() { # tag_text <flat-html> <regex for the whole element>
   { grep -oiE "$2" <<< "$1" | sed -n '1p' |
-    sed -E 's/<[^>]*>//g' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g'; } || true
+    sed -E 's/<[^>]*>//g' | decode | sed -E 's/^[[:space:]]+|[[:space:]]+$//g'; } || true
 }
 
 [[ $# -ge 1 ]] || usage
@@ -180,19 +182,30 @@ case "$CONTENT_TYPE" in
   *html*) ;;
   *) echo "not HTML ($CONTENT_TYPE): $URL" >&2; exit 5 ;;
 esac
+# Titles, descriptions and headings reach the grounding checks, where "&" never
+# matches "&amp;" (measured 2026-09-22: "Cat Bowls &amp; Feeders", "... top 4
+# picks! &#8211; Three Chatty Cats"). Only the entities seen in live research are
+# decoded, and &amp; goes last so "&amp;amp;" decodes once, to "&amp;". Anything
+# else is left as written rather than guessed at.
+decode() {
+  sed -e 's/&quot;/"/g' -e "s/&#39;/'/g" -e 's/&lt;/</g' -e 's/&gt;/>/g' \
+      -e 's/&nbsp;/ /g' -e 's/&#8211;/–/g' -e 's/&#8217;/’/g' \
+      -e 's/&#8220;/“/g' -e 's/&#8221;/”/g' -e 's/&amp;/\&/g'
+}
 
 FLAT=$(flatten "$BODY_PATH")
 TITLE=$(tag_text "$FLAT" '<title[^>]*>[^<]*</title>')
 DESC=$({ grep -oiE '<meta[^>]+name[[:space:]]*=[[:space:]]*"?description"?[^>]*>' <<< "$FLAT" | sed -n '1p' |
        grep -oiE 'content[[:space:]]*=[[:space:]]*("[^"]*"|'"'"'[^'"'"']*'"'"')' | sed -n '1p' |
-       sed -E 's/^[^=]*=[[:space:]]*.//; s/.$//'; } || true)
+       sed -E 's/^[^=]*=[[:space:]]*.//; s/.$//' | decode; } || true)
 # Any inner markup that is not the closing heading tag counts as heading content.
 # The old pattern allowed nested opening tags but not closing ones, so
 # "<h2><span>Title</span></h2>" matched nothing, which is the commonest heading
 # markup on the web. Measured 2026-09-22 on a cached competitor: 8 matches where
 # the page has 31 headings, and the 23 missed were its entire article structure.
 HEADINGS=$({ grep -oiE '<h[1-3][^>]*>([^<]|<[^/]|</[^hH])*</h[1-3][^>]*>' <<< "$FLAT" |
-  sed -E 's#^<(h[1-3])[^>]*>#\1\t#I; s#</h[1-3][^>]*>$##I; s#<[^>]*>##g; s# +# #g; s#\t #\t#; s# $##' |
+  sed -E 's#^<(h[1-3])[^>]*>#\1\t#I; s#</h[1-3][^>]*>$##I; s#<[^>]*>##g' | decode |
+  sed -E 's# +# #g; s#\t #\t#; s# $##' |
   grep -vE $'^h[1-3]\t*$'; } || true)
 # Body text for the word count: whole regions go first, then the remaining tags.
 # sed cannot match non-greedily, so the old pair of expressions left any script

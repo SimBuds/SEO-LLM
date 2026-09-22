@@ -188,10 +188,21 @@ run_stage() { # run_stage <index> <stage>
   fi
   [[ -s "$prompt" ]] || { echo "filled prompt for $stage is empty" >&2; exit 2; }
 
+  # A maxLength in the schema truncates rather than rejects, so a field that
+  # lands exactly on its cap was cut mid-word. A cut reply is as unusable as an
+  # unparseable one and goes to the next seed: a non-fatal check here let a cut
+  # target_audience reach the merged brief and pass check.sh brief (2026-09-22).
+  local candidate="${out%.json}.reply.tmp"
   for seed in 1 2; do
     if reply=$(LLM_MODEL="${STAGE_MODEL:-qwen}" bash "$HERE/llm_call.sh" "$prompt" "$TEMP" "$seed" "$schema") \
        && jq -e . <<< "$reply" > /dev/null 2>&1; then
-      printf '%s\n' "$reply" | jq . > "$out"
+      printf '%s\n' "$reply" | jq . > "$candidate"
+      if ! bash "$HERE/check.sh" truncated "$candidate" "$schema"; then
+        rm -f "$candidate"
+        echo "stage $stage: reply cut off at a schema cap at seed $seed" >&2
+        continue
+      fi
+      mv "$candidate" "$out"
       echo "wrote $out (seed $seed)" >&2
       # The structure stage is checked as it is written, because an ungrounded
       # section reaches the brief and then the page, and it is cheapest to catch
@@ -204,15 +215,11 @@ run_stage() { # run_stage <index> <stage>
       if [[ "$stage" == targets ]]; then
         bash "$HERE/check.sh" targets "$out" "$RESEARCH" || true
       fi
-      # A maxLength in the schema truncates rather than rejects, so a field that
-      # lands exactly on its cap was cut mid-word. The schema is already beside
-      # the data for this stage.
-      bash "$HERE/check.sh" truncated "$out" "${out%.json}.schema.json" || true
       return 0
     fi
     echo "stage $stage: unusable reply at seed $seed" >&2
   done
-  echo "stage $stage failed twice: read $prompt and fix the input before retrying" >&2
+  echo "stage $stage failed twice (unusable or cut off at a schema cap): read $prompt and fix the input before retrying" >&2
   exit 3
 }
 

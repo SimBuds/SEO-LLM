@@ -11,7 +11,7 @@
       "target_audience": {
         "type": "string",
         "minLength": 1,
-        "maxLength": 200
+        "maxLength": 300
       },
       "reader_goal": {
         "type": "string",

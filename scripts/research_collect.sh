@@ -202,6 +202,13 @@ clear your cart|clear your code|clear your bag|shopping cart|view cart|your cart
 close|close menu|skip to main content|main menu|
 footer|navigation|breadcrumb|quick links|customer service|shipping|returns)$'
 FURNITURE=$(tr -d '\n' <<< "$FURNITURE")
+# A product tile is not a subtopic either. Nested headings made retail catalogues
+# visible, and "PetSafe® Viva Pet Water Fountain - 1.8L/64 oz" in the grounding
+# haystack let a brief section, or nearly any pet brand in a CTA, trace to it. A
+# trademark or a pack size marks a tile. Measured on the four live competitors:
+# it matched 35 of PetSmart's 42 headings and none of the 35 editorial headings
+# on the other three pages (2026-09-22).
+PRODUCT='®|™|\b[0-9]+(\.[0-9]+)? ?(oz|l|lb|lbs|ml|ct|pk|pack|count|gal)\b|\b[0-9]+-pack\b'
 DROPPED_HEADINGS=0
 
 COMPETITORS='[]'
@@ -221,10 +228,18 @@ if [[ -r "$URLS_FILE" ]]; then
         '. + [{url: $u, fetched: false, error: $r, exit: $c}]' <<< "$COMPETITORS")
     else
       before=$(jq '[.headings[]?] | length' <<< "$page")
-      page=$(jq --arg f "$FURNITURE" '
+      # A page where at least half the headings are tiles is a listing, and keeps
+      # only its H1: the rest of its tiles carry no mark (PetSmart's five
+      # "PETLIBRO ..." tiles), so the page is the unit, not the heading.
+      page=$(jq --arg f "$FURNITURE" --arg p "$PRODUCT" '
         .headings = [.headings[]? | select((.text | ascii_downcase
                      | gsub("^\\s+|\\s+$"; "") | gsub("[?!.:,]+$"; "")
-                     | test($f)) | not)]' <<< "$page")
+                     | test($f)) | not)]
+        | ([.headings[] | select(.text | test($p; "i"))] | length) as $tiles
+        | if $tiles > 0 and $tiles * 2 >= (.headings | length)
+          then .headings = [.headings[] | select(.level == "h1")]
+          else .headings = [.headings[] | select(.text | test($p; "i") | not)]
+          end' <<< "$page")
       after=$(jq '[.headings[]?] | length' <<< "$page")
       DROPPED_HEADINGS=$(( DROPPED_HEADINGS + before - after ))
       COMPETITORS=$(jq --argjson p "$page" '. + [$p + {fetched: true}]' <<< "$COMPETITORS")

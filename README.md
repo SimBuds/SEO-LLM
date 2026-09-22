@@ -237,6 +237,12 @@ router: serving qwen
   to type or place something (the page check and the research collection), stops
   after each brief stage so you read it, and stops at the first failure. From a
   finished brief it will take you to `final.md` in one keypress.
+- **Staleness runs down the chain.** A stage built from a stale input reads
+  stale itself, with the reason naming the input, so after the brief changes the
+  outline, draft, rewrite and review all read stale, not only the outline. `a`
+  treats a stale stage as work. If you decline to replace one, it stays stale,
+  and `a` stops there rather than rebuilding every later stage from the one you
+  kept.
 - **A recorded answer can be changed.** `e` lists what the page has on file, the
   purpose, the content type, your suggested keywords, the facts and your site
   URL, with each value beside it. Picking one says what changing it invalidates,
@@ -309,7 +315,9 @@ unclosed opening tag drops everything after it rather than counting it. With no 
   (default 2) and longer when `robots.txt` asks for more.
 - **It caches the raw HTML** under `research/_cache/` for `FETCH_CACHE_TTL`
   seconds (default 86400), so reruns and competitor collection do not re-hit a
-  site. That directory is gitignored.
+  site. That directory is gitignored. The cache follows `RESEARCH_DIR`, so a
+  run relocated to a scratch tree caches inside it, and `FETCH_CACHE_DIR`
+  overrides both.
 - **`FETCH_UA` sets the User-Agent**, which defaults to `SEO-LLM/1.0` with no
   contact address. Set it to something with a contact if you fetch at volume.
 - **`FETCH_TIMEOUT`** (default 20 seconds) caps each request.
@@ -361,6 +369,14 @@ hand works exactly the same, and is how you add to a page later.
   string, so "How to help your cat drink" survives. `research.json` records
   `headings_dropped` and `check.sh research` WARNs with the count. Measured on a
   live run: 6 of 16 collected headings were furniture.
+- **Product tiles are dropped too.** A heading carrying a trademark (`®`, `™`) or
+  a pack size (`64 oz`, `1.8L`, `4 CT`, `2-pack`) is a product tile. A page where
+  at least half the headings are tiles is a retail listing and keeps only its H1,
+  because some of its tiles carry no marker at all. Tiles count toward
+  `headings_dropped`. Measured on the live competitors: a PetSmart category page
+  went from 42 headings to 1, and the 35 headings on three editorial pages were
+  all kept. A tile with no marker on a page under the listing threshold still
+  gets through.
 - **An export that cannot be read stops the run** (exit 4), names the file, and
   writes nothing, rather than leaving a `research.json` with no keywords in it that
   looks like a topic with no data. An export with no keyword column still exits 3
@@ -562,9 +578,12 @@ The edit is checked against its input with `check.sh rewrite`: identical heading
 
 A `maxLength` truncates the reply rather than rejecting it, so a capped field
 arrives cut mid-word and nothing downstream can tell. `check.sh truncated` runs on
-every brief stage as it is written, and three caps have been raised on its
-evidence: `gaps` 200 to 400, `cta` 120 to 200, `cta_reason` 300 to 500, each after
-a live value landed exactly on the cap, once ending in a stray CJK character. The
+every brief stage reply before it is written. A cut reply is treated like an
+unusable one and retried at the next seed, and when both seeds are cut the stage
+exits 3, names the field, and writes no stage file. Four caps have been raised on
+its evidence: `gaps` 200 to 400, `cta` 120 to 200, `cta_reason` 300 to 500 and
+`target_audience` 200 to 300, each after a live value landed exactly on the cap,
+twice ending in a stray CJK character. The
 remaining caps were audited against the longest values observed and none is within
 10% of binding.
 | `research <research.json>` | the file does not match the expected shape | no keywords, no volume column anywhere, no competitors, fewer than 3 fetched, a competitor that failed, an existing page with no title or no meta description |

@@ -340,7 +340,7 @@ research)
                 | "\(.url) (\(.word_count) words)"] | join("; ")' "$RESEARCH")
   [[ -z "$ODD" ]] || warn "competitor word count is implausible, so the page's own text was probably not what was measured: $ODD"
   DROPPED=$(jq -r '.headings_dropped // 0' "$RESEARCH")
-  (( DROPPED == 0 )) || warn "$DROPPED competitor heading(s) were dropped as page furniture (About, Help, comments and the like), so they cannot be mistaken for subtopics"
+  (( DROPPED == 0 )) || warn "$DROPPED competitor heading(s) were dropped as page furniture (About, Help, comments and the like) or product tiles (a trademark or pack size, or every tile on a listing page), so they cannot be mistaken for subtopics"
   OK=$(jq '[.competitors[] | select(.fetched)] | length' "$RESEARCH")
   TOTAL=$(jq '.competitors | length' "$RESEARCH")
   (( TOTAL > 0 )) || warn "no competitor pages: add URLs to competitors.txt for intent and gap analysis"
