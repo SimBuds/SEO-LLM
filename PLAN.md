@@ -425,6 +425,16 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - Consequence for everything upstream of the brief: `must_cover`, `gaps`, the intent read and the grounding haystack `check.sh stage` traces against had all been working from about a quarter of the competitors' structure. Both briefs were rebuilt on the corrected research: the cleaning page's sections now trace to competitor H3s with none resting on the page purpose, and the fountain page's `must_cover` went from one competitor's table of contents to six buying criteria.
 - Three schema caps were raised on evidence from `check.sh truncated` while rebuilding: `gaps` 200 to 400, `cta` 120 to 200, `cta_reason` 300 to 500.
 
+### Phases 76 to 82: What a /verify run of phases 36 to 75 found (done 2026-09-22)
+- Files: `scripts/seo.sh`, `scripts/brief_stages.sh`, `scripts/research_collect.sh`, `scripts/fetch_page.sh`, `scripts/check.sh`, `prompts/brief-stage.schema.json`, `README.md`, `.claude/skills/verify/SKILL.md`.
+- 76: `e` deleted the recorded answer before re-asking, so an invalid new answer lost the old one. It now restores it.
+- 77: `check.sh truncated` ran after a stage was already written and could not stop it, and a cut `target_audience` reached a merged brief that passed `check.sh brief`. A cut reply is now retried at the next seed like an unusable one, and the stage exits 3 when both seeds are cut. `target_audience` went from 200 to 300.
+- 78: Phase 75 made retail catalogues visible, and product tiles such as `PetSafe® Viva ... 1.8L/64 oz` entered the grounding haystack. A heading with a trademark or pack size is a tile, and a page with at least half tiles keeps only its H1. PetSmart went from 42 headings to 1, and the 35 editorial headings were all kept.
+- 79: the fetch cache defaulted to the repo's `research/_cache` even under a scratch `RESEARCH_DIR`. It now follows `RESEARCH_DIR`.
+- 80: titles, descriptions and headings kept HTML entities, so `&` never matched `&amp;` in a grounding check. The entities seen in live research are decoded. `&ndash;` was missed by the audit and is deferred.
+- 81: a piped `./seo` with an invalid slug rendered a menu and exited 0. The slug is now checked first.
+- 82: staleness was pairwise, so after a brief change the draft and final still read `done`. It now runs down the chain, and `a` stops at a stale stage you declined to replace, because otherwise it rebuilt every later stage from the one you kept.
+
 ### Phase 15: Docs + SEO knowledge base
 - Files: `README.md`, `docs/google/{helpful-content,eeat,semantic-search,ai-content-guidelines}.md`, link from system prompt.
 - Goal: prompts ground in EEAT / helpful-content guidance, and the quickstart is documented.
