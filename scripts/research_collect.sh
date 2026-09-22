@@ -12,9 +12,13 @@
 # scripts/fetch_page.sh so robots.txt, the per-host delay and the cache all apply.
 #
 # Env: RESEARCH_DIR (default research) relocates the whole tree, which is how
-# verification runs stay out of the real one.
+# verification runs stay out of the real one. MAX_KEYWORDS (default 150) caps how
+# many keywords reach research.json, taken from the head of the volume sort,
+# because a full keyword export is far larger than the model's context. 0 keeps
+# every row.
 #
-# Exit codes: 1 usage, 2 missing page.json, 3 an export has no keyword column.
+# Exit codes: 1 usage, 2 missing page.json, 3 an export has no keyword column,
+#             4 an export could not be parsed or merged (nothing is written).
 
 set -euo pipefail
 
@@ -24,6 +28,9 @@ ROOT="${RESEARCH_DIR:-research}"
 SLUG="${1:?usage: research_collect.sh <slug> [--fresh]}"
 # --fresh ignores the HTML cache, so competitor pages are fetched again.
 if [[ "${2:-}" == "--fresh" ]]; then export FETCH_CACHE_TTL=0; fi
+
+# How many keywords may reach research.json, head of the volume sort. 0 keeps all.
+MAX_KEYWORDS="${MAX_KEYWORDS:-150}"
 
 DIR="$ROOT/$SLUG"
 PAGE="$DIR/page.json"
@@ -131,25 +138,51 @@ export_to_json() { # export_to_json <file>
 }
 
 # --- keyword exports -------------------------------------------------------
-KEYWORDS='[]'
+# The keyword list lives in a file, never in a jq argument. Linux caps a single
+# argv string at 128 KB (MAX_ARG_STRLEN) whatever ARG_MAX reports, and a real
+# Ahrefs export parses to several hundred KB, so --argjson died with "Argument
+# list too long" on the exports this pipeline exists to read. Found 2026-09-21 on
+# a 2782-row file.
+KW_FILE=$(mktemp); ROWS_FILE=$(mktemp)
+trap 'rm -f "$KW_FILE" "$ROWS_FILE" "$KW_FILE.new"' EXIT
+echo '[]' > "$KW_FILE"
 INPUT_FILES=()
 if compgen -G "$DIR/inputs/*" > /dev/null; then
   for f in "$DIR"/inputs/*; do
     [[ -f "$f" ]] || continue
     case "${f,,}" in *.csv|*.tsv|*.txt) ;; *) continue ;; esac
     INPUT_FILES+=("$(basename "$f")")
-    rows=$(export_to_json "$f")
+    export_to_json "$f" > "$ROWS_FILE" \
+      || { echo "ERROR: could not read the export $f, so nothing was written" >&2; exit 4; }
     # Merge by keyword: a later file fills gaps but never overwrites a value,
     # and every file that mentioned the keyword is listed in sources.
-    KEYWORDS=$(jq -n --argjson a "$KEYWORDS" --argjson b "$rows" '
-      ($a + $b)
+    jq -n --slurpfile a "$KW_FILE" --slurpfile b "$ROWS_FILE" '
+      ($a[0] + $b[0])
       | group_by(.keyword | ascii_downcase)
       | map((map(.sources) | add | unique) as $srcs
             | reduce .[] as $r ({}; $r + with_entries(select(.value != null)))
-            | .sources = $srcs)')
+            | .sources = $srcs)' > "$KW_FILE.new" \
+      || { echo "ERROR: could not merge the export $f into the keyword list, so nothing was written" >&2; exit 4; }
+    mv "$KW_FILE.new" "$KW_FILE"
   done
 fi
-KEYWORDS=$(jq 'sort_by([(.volume // 0), (.clicks // 0)]) | reverse' <<< "$KEYWORDS")
+jq 'sort_by([(.volume // 0), (.clicks // 0)]) | reverse' "$KW_FILE" > "$KW_FILE.new"
+mv "$KW_FILE.new" "$KW_FILE"
+
+# A full Ahrefs "matching terms" export is thousands of rows, and the whole list
+# would not fit the keyword prompt's context. Keep the head of the volume sort,
+# and record what was cut so the reader of research.json knows the list is not
+# the whole file. MAX_KEYWORDS=0 keeps everything, for a run that only wants the
+# data on disk.
+KEYWORDS_TOTAL=$(jq 'length' "$KW_FILE")
+KEYWORDS_CUTOFF=null
+if (( MAX_KEYWORDS > 0 && KEYWORDS_TOTAL > MAX_KEYWORDS )); then
+  KEYWORDS_CUTOFF=$(jq -c --argjson n "$MAX_KEYWORDS" '
+    {by: "volume", kept: $n, dropped: (length - $n), min_volume: (.[$n - 1].volume // 0)}' "$KW_FILE")
+  jq --argjson n "$MAX_KEYWORDS" '.[0:$n]' "$KW_FILE" > "$KW_FILE.new"
+  mv "$KW_FILE.new" "$KW_FILE"
+  echo "keywords: kept the top $MAX_KEYWORDS of $KEYWORDS_TOTAL by volume (MAX_KEYWORDS=0 keeps all)" >&2
+fi
 
 # --- competitor pages ------------------------------------------------------
 COMPETITORS='[]'
@@ -197,13 +230,13 @@ if [[ -n "$SITE_URL" ]]; then
   if [[ -r "$INVENTORY" ]]; then
     # A page "already targets" a keyword when every word of four letters or more
     # in that keyword appears in the URL's own path.
-    SITE_PAGES=$(jq -R -s --argjson kws "$KEYWORDS" --arg host "$HOST" '
+    SITE_PAGES=$(jq -R -s --slurpfile kwf "$KW_FILE" --arg host "$HOST" '
       split("\n") | map(select(length > 0)) as $urls
       | {
           host: $host,
           total: ($urls | length),
           matching: [
-            $kws[] as $k
+            $kwf[0][] as $k
             | ($k.keyword | ascii_downcase | [scan("[a-z0-9]{4,}")]) as $words
             | select($words | length > 0)
             | $urls[]
@@ -220,7 +253,9 @@ fi
 jq -n \
   --arg slug "$SLUG" \
   --argjson page "$(cat "$PAGE")" \
-  --argjson keywords "$KEYWORDS" \
+  --slurpfile keywords "$KW_FILE" \
+  --argjson keywords_total "$KEYWORDS_TOTAL" \
+  --argjson keywords_cutoff "$KEYWORDS_CUTOFF" \
   --argjson competitors "$COMPETITORS" \
   --argjson site_pages "$SITE_PAGES" \
   --arg inputs "${INPUT_FILES[*]:-}" '
@@ -229,7 +264,9 @@ jq -n \
     collected_at: (now | todate),
     existing_page: $page,
     inputs: ($inputs | split(" ") | map(select(length > 0))),
-    keywords: $keywords,
+    keywords: $keywords[0],
+    keywords_total: $keywords_total,
+    keywords_cutoff: $keywords_cutoff,
     competitors: $competitors,
     competitor_word_counts: ($competitors | map(select(.fetched and .word_count != null) | .word_count)),
     site_pages: $site_pages

@@ -56,10 +56,11 @@ No model call in this stage. It gathers what the page has to beat.
 3. **Competitors.** `./seo` asks for these too, one per line. By hand, put the top 3 to 5 ranking URLs into `research/<slug>/competitors.txt`, one per line. You find them in Google, because the pipeline never fetches a results page.
 4. **Collect:** `scripts/research_collect.sh` merges the exports by keyword, fetches each competitor (obeying `robots.txt`, waiting between requests to one host, caching the HTML), and writes `research/<slug>/research.json`.
    It also builds your own page inventory from your sitemap, once per site, and records which of your pages already target a researched query. For a page that is not live yet, put your site URL in `research/<slug>/site.txt` so it knows where to look.
-5. **`check.sh research`:**
+5. **The keyword list is capped at 150** by volume (`MAX_KEYWORDS`, `0` keeps all), because a full keyword export is thousands of rows and does not fit the keyword prompt's context. `research.json` records `keywords_total` and `keywords_cutoff`, and the check WARNs when a cut happened. An export that cannot be read stops the run (exit 4) and writes nothing.
+6. **`check.sh research`:**
    - **Fails** only when the file's shape is broken.
    - **Warns** on thin research: no keywords, no competitors, fewer than three fetched, an existing page missing its title or meta description, or one of your own pages already targeting the query.
-6. **Your review:** read the competitor word counts and their H2 outlines. They set the length and the sections the page has to cover.
+7. **Your review:** read the competitor word counts and their H2 outlines. They set the length and the sections the page has to cover.
 
 ## 2. `/seo-keywords <slug>`: research → the target keyword
 
@@ -69,7 +70,7 @@ One model call at temperature 0.2 against `research.json`, one line from you abo
 
 ## 3. `/seo-brief <slug>`: research → brief, one stage at a time
 
-Four stages, one model call each. The command stops after every stage so you can read and correct it, and each stage sees the ones you approved.
+Four stages, one model call each, and each stage sees the ones before it. From the menu one press runs every stage that is still missing and stops once at the end with all four to read. `/seo-brief` in Claude Code still walks them one at a time.
 
 1. **intent:** topic, audience, reader goal, tone, each with its reason.
 2. **structure:** the sections this page needs, each tagged with where it came from, plus the FAQ questions and the gaps in the ranking pages.
@@ -171,8 +172,8 @@ router: serving qwen
 
 All nine stages run from the menu, and `a` runs every ready one in turn. It
 stops before the two stages that need you (the page check wants a URL or a no,
-the collection wants your exports and competitor URLs), stops after each brief
-stage so you read it before the next, and stops at the first failure. From a
+the collection wants your exports and competitor URLs), stops after the brief
+stages so you read all four, and stops at the first failure. From a
 finished brief, one `a` takes you through the outline, the draft, the rewrite
 and the review.
 

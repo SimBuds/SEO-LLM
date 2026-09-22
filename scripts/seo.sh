@@ -432,21 +432,34 @@ action_brief_stage() {
     say "  bash scripts/brief_stages.sh $SLUG --redo <intent|structure|targets|facts>"
     return 0
   fi
-  say "running brief stage $((n + 1)) of 4 (${names[$n]})..."
   local -a targs=()
   [[ -n "$TYPE" ]] && targs=(--type "$TYPE")
-  bash "$ROOT/scripts/brief_stages.sh" "$SLUG" --purpose "$PURPOSE" "${targs[@]}" || {
-    err "the stage failed, see the message above."
-    return 1
-  }
+  # Every remaining stage runs in one press. The stages are a chain, so the loop
+  # advances only when a stage really lands on disk: a call that exits 0 without
+  # writing one stops it, rather than calling the model again on the same stage.
+  local written
+  while (( n < 4 )); do
+    say ""
+    say "${BOLD}--- stage $((n + 1)) of 4: ${names[$n]}${RESET}"
+    bash "$ROOT/scripts/brief_stages.sh" "$SLUG" --purpose "$PURPOSE" "${targs[@]}" || {
+      err "the ${names[$n]} stage failed, see the message above. The stages before it are kept."
+      return 1
+    }
+    written=$(stage_count_brief_stages)
+    if (( written <= n )); then
+      err "the ${names[$n]} stage wrote no file, so the run is stopped rather than repeated."
+      return 1
+    fi
+    n=$written
+  done
   say ""
-  case "${names[$n]}" in
-    intent)    say "Check: is the audience a real description, not a category? Is reader_goal the reader's goal?" ;;
-    structure) say "Check: every section carries a source. Challenge any you cannot find in the research." ;;
-    targets)   say "Check the call to action. This is where a page promises something the business does not offer." ;;
-    facts)     say "Check: every qualifier kept (most, from, up to), and read 'omitted' as closely as 'facts'." ;;
-  esac
-  say "Edit the file directly to change a value. A rerun resamples everything."
+  say "${BOLD}All four stages are written. Read each one:${RESET}"
+  say "  intent     is the audience a real description, not a category? Is reader_goal the reader's goal?"
+  say "  structure  every section carries a source. Challenge any you cannot find in the research."
+  say "  targets    the call to action. This is where a page promises what the business does not offer."
+  say "  facts      every qualifier kept (most, from, up to), and read 'omitted' as closely as 'facts'."
+  say ""
+  say "Edit a file directly to change a value. A rerun resamples everything."
   say "To rebuild a stage and everything after it: bash scripts/brief_stages.sh $SLUG --redo <stage>"
 }
 

@@ -198,6 +198,13 @@ router: serving qwen
   what to do when the retries are exhausted.
 - **Replacing an artifact always asks**, and replacing a brief says plainly that
   your edits go with it.
+- **One press runs every remaining brief stage.** Choosing the brief stages runs
+  intent, structure, targets and facts in order, announcing each as it lands, and
+  stops once with all four written and a line on what to check in each. A stage
+  that fails stops the loop there and the earlier stages are kept, and a stage
+  that returns without writing a file stops it too rather than calling the model
+  again on the same stage. `bash scripts/brief_stages.sh <slug> --redo <stage>`
+  still rebuilds one stage and everything after it.
 - **`a` runs every ready stage in turn.** It stops before a stage that needs you
   to type or place something (the page check and the research collection), stops
   after each brief stage so you read it, and stops at the first failure. From a
@@ -265,6 +272,18 @@ hand works exactly the same, and is how you add to a page later.
   numbers. Rows are merged by keyword, and each keyword lists the files it came
   from. An export with no recognizable keyword column exits 3 and prints the
   columns it saw rather than writing empty rows.
+- **The keyword list is capped at 150** (`MAX_KEYWORDS`, and `0` keeps every row),
+  taken from the head of the volume sort. A full Ahrefs "matching terms" export is
+  thousands of rows and several hundred KB, which is far past the 32768-token
+  context the keyword prompt has to fit in. `research.json` records
+  `keywords_total` and a `keywords_cutoff` object naming how many were kept and
+  dropped and the volume the cut landed on, and `check.sh research` WARNs about it,
+  so nobody reads the list as the whole file. Measured on a real export:
+  2782 rows in, the top 150 kept at volume 10 and above, `research.json` 31 KB.
+- **An export that cannot be read stops the run** (exit 4), names the file, and
+  writes nothing, rather than leaving a `research.json` with no keywords in it that
+  looks like a topic with no data. An export with no keyword column still exits 3
+  and prints the columns it saw.
 - **Competitors** go in `research/<slug>/competitors.txt`, one URL per line with
   `#` comments allowed. Each is fetched through `fetch_page.sh`, so robots.txt,
   the delay and the cache all apply. One that cannot be fetched is recorded with

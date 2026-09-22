@@ -223,6 +223,11 @@ research)
   (( FAILS == 0 )) || exit 1
 
   KW=$(jq '.keywords | length' "$RESEARCH")
+  # A capped list is not the whole export, and every later stage reads only what
+  # survived the cap, so the cut is reported wherever this file is checked.
+  CUT=$(jq -r '.keywords_cutoff // empty
+               | "the keyword list is the top \(.kept) of \(.kept + .dropped) by volume, so everything below volume \(.min_volume) is invisible to the keyword stage (MAX_KEYWORDS=0 keeps all)"' "$RESEARCH" 2>/dev/null || true)
+  [[ -z "$CUT" ]] || warn "$CUT"
   (( KW > 0 )) || warn "no keywords: add an export to inputs/ (Search Console Performance is the first choice, a third-party export works when the page has no Search Console history), or expect the keyword stage to work from competitor pages alone"
   # Search Console data is what this pipeline prefers: measured impressions and
   # clicks for the user's own site. A page with no Search Console history has
