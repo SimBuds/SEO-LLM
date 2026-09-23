@@ -436,6 +436,11 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - 82: staleness was pairwise, so after a brief change the draft and final still read `done`. It now runs down the chain, and `a` stops at a stale stage you declined to replace, because otherwise it rebuilt every later stage from the one you kept.
 - Closing the work: both slugs were re-collected from the cache. The fountain page lost 41 PetSmart tiles, the how-to page only had entities decoded, and neither brief traced to anything removed, so neither was rebuilt. The fountain page's `30 60` decibel FAIL was an unsourced "below 30 dB is recommended". It was closed by redoing that one part with `p` rather than accepting the figures with `n`, and the redone part states no figures.
 
+### Phases 83 and 84: Redoing one part stays one part (done 2026-09-23)
+- Files: `scripts/lib_parts.sh`, `scripts/seo.sh`.
+- 83: `unbold()` ran `sed -i` on every part, and `sed -i` writes a new file even when nothing matches. A resumed draft therefore gave every skipped part a new mtime, and the rewrite, which skips a part only when its edit is newer than its input, re-edited all 8 parts after `p` redid one. `unbold()` now rewrites a part only when it holds bold outside a heading. Measured on the fountain slug: 8 of 8 mtimes changed before, 0 of 8 after, and `p` followed by `a` re-edited 1 part instead of 8.
+- 84: `p` listed the `_outline_headings` sidecar as a part. Files starting with `_` are no longer offered.
+
 ### Phase 15: Docs + SEO knowledge base
 - Files: `README.md`, `docs/google/{helpful-content,eeat,semantic-search,ai-content-guidelines}.md`, link from system prompt.
 - Goal: prompts ground in EEAT / helpful-content guidance, and the quickstart is documented.
