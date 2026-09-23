@@ -74,7 +74,6 @@ SEO-LLM/
 ├── INSTRUCTIONS.md     # stage-by-stage walk through the whole pipeline
 ├── PLAN.md             # architecture + phased MVP plan
 ├── README.md
-behind the pipeline: fundamentals, intermediate practice, glossary
 ```
 
 ## Prerequisites

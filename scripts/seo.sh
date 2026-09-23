@@ -695,7 +695,9 @@ action_redo_part() {
   sec="$out/sections"
   [[ -d "$sec" ]] || { warn "no drafted parts yet: run the draft stage first."; return 0; }
   local -a parts=()
-  mapfile -t parts < <(find "$sec" -maxdepth 1 -name '*.md' \
+  # Sidecars draft_sections.sh keeps beside the parts start with "_". Listing
+  # _outline_headings as a part offered to delete it and redraft nothing.
+  mapfile -t parts < <(find "$sec" -maxdepth 1 -name '*.md' ! -name '_*' \
     ! -name '*.block.md' ! -name '*.unverified.md' ! -name '*.ERROR.md' -printf '%f\n' | sort)
   (( ${#parts[@]} )) || { warn "no drafted parts yet: run the draft stage first."; return 0; }
   say ""

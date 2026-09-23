@@ -434,6 +434,7 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - 80: titles, descriptions and headings kept HTML entities, so `&` never matched `&amp;` in a grounding check. The entities seen in live research are decoded. `&ndash;` was missed by the audit and is deferred.
 - 81: a piped `./seo` with an invalid slug rendered a menu and exited 0. The slug is now checked first.
 - 82: staleness was pairwise, so after a brief change the draft and final still read `done`. It now runs down the chain, and `a` stops at a stale stage you declined to replace, because otherwise it rebuilt every later stage from the one you kept.
+- Closing the work: both slugs were re-collected from the cache. The fountain page lost 41 PetSmart tiles, the how-to page only had entities decoded, and neither brief traced to anything removed, so neither was rebuilt. The fountain page's `30 60` decibel FAIL was an unsourced "below 30 dB is recommended". It was closed by redoing that one part with `p` rather than accepting the figures with `n`, and the redone part states no figures.
 
 ### Phase 15: Docs + SEO knowledge base
 - Files: `README.md`, `docs/google/{helpful-content,eeat,semantic-search,ai-content-guidelines}.md`, link from system prompt.

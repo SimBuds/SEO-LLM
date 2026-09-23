@@ -181,6 +181,11 @@ stages so you read all four, and stops at the first failure. From a
 finished brief, one `a` takes you through the outline, the draft, the rewrite
 and the review.
 
+A stage built from a stale input reads stale too, so after the brief changes
+everything below it says so, and `a` treats each stale stage as work. Declining
+to replace one stops `a` there, because every later stage would only be rebuilt
+from the one you kept.
+
 The menu asks the page purpose, the content type, your suggested keywords and the
 facts the page may state once each and reuses them, with `e` to change any of them
 later and clear whatever was built on the old answer. It checks the router before any model call, offers a reseed when
@@ -195,8 +200,8 @@ replacing an artifact.
   - Thinking is off, and all sampling settings are fixed in the script.
   - `LLM_MODEL`, `LLM_MAX_TOKENS` and `LLM_TIMEOUT` change the model, output limit and timeout.
 - **`scripts/fetch_sitemap.sh`:** reads your sitemap (and a sitemap index) into a plain URL list, once per site, through the fetcher below.
-- **`scripts/fetch_page.sh`:** the only way this repo reaches the open web. It obeys `robots.txt`, waits between requests to one host, caches the HTML in `research/_cache/`, and pulls out the title, meta description, headings and word count. `FETCH_UA` sets the User-Agent, which carries no contact address by default.
-- **`scripts/research_collect.sh`:** merges your keyword exports by column name and fetches the competitor URLs into one `research.json`.
+- **`scripts/fetch_page.sh`:** the only way this repo reaches the open web. It obeys `robots.txt`, waits between requests to one host, caches the HTML in `_cache/` under `RESEARCH_DIR` (so `research/_cache/` by default, and inside a scratch tree when one is set), and pulls out the title, meta description, headings and word count, with common HTML entities decoded. `FETCH_UA` sets the User-Agent, which carries no contact address by default.
+- **`scripts/research_collect.sh`:** merges your keyword exports by column name and fetches the competitor URLs into one `research.json`. It drops competitor headings that are page furniture or product tiles, and a retail listing page keeps only its H1.
 - **`./seo`:** the launcher at the repo root. It resolves the repository from its own path and hands over to `scripts/seo.sh`, so it works from any directory.
 - **`scripts/seo.sh`:** the interactive menu, and the intake that fills in a new page's inputs before it. It runs the other scripts and reads state from the artifacts, so it holds no state of its own.
 - **`scripts/brief_stages.sh`:** one model call per brief stage, stopping after each for your approval, then `--merge` assembles `briefs/<slug>.json` and computes the word count from the competitor median.

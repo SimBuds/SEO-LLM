@@ -43,8 +43,12 @@ restore_headings() {
 }
 
 # unbold <part>: the prompts never ask for bold, but the model bolds keyword
-# phrases anyway. Strip bold from every non-heading line.
+# phrases anyway. Strip bold from every non-heading line. The file is only
+# rewritten when there is bold to strip: sed -i writes a new file even when
+# nothing matches, and the new mtime made a resumed rewrite re-edit every part
+# after one was redrafted (2026-09-22).
 unbold() {
+  grep -qE '^[^#].*\*\*[^*]+\*\*' "$1" || return 0
   sed -i -E '/^#/!s/\*\*([^*]+)\*\*/\1/g' "$1"
 }
 
