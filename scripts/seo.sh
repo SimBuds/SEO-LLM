@@ -2,6 +2,8 @@
 # Interactive front door for the pipeline.
 #
 # Usage: seo.sh [slug]
+#        seo.sh --auto <slug>    run every remaining stage with no one at the
+#                                keyboard (see "unattended" below)
 #
 # Shows every stage of a page with its state, read from the files on disk, and
 # runs the stage you pick. Nothing is remembered between runs: the artifacts are
@@ -23,6 +25,8 @@ RESEARCH="${RESEARCH_DIR:-$ROOT/research}"
 BRIEFS="${BRIEFS_DIR:-$ROOT/briefs}"
 OUTPUTS="${OUTPUTS_DIR:-$ROOT/outputs}"
 LLM_HOST="${LLM_HOST:-http://localhost:8080}"
+AUTO=0
+AUTO_FILE=""
 
 if [[ -t 1 ]] && command -v tput > /dev/null && [[ $(tput colors 2>/dev/null || echo 0) -ge 8 ]]; then
   BOLD=$(tput bold); DIM=$(tput dim); RESET=$(tput sgr0)
@@ -38,6 +42,24 @@ source "$ROOT/scripts/lib_parts.sh"
 say()  { printf '%s\n' "$*"; }
 warn() { printf '%s%s%s\n' "$YELLOW" "$*" "$RESET"; }
 err()  { printf '%s%s%s\n' "$RED" "$*" "$RESET"; }
+
+# ask <key> <prompt> <default>: one answer, into ANSWER. From the keyboard it is
+# exactly the read it replaced. In auto mode it never reads stdin: the answer is
+# the slug's auto.json value for <key>, else <default>. JSON true and false read
+# as y and n, because every question routed here is a yes/no or a number.
+ask() {
+  local key="$1" prompt="$2" default="$3"
+  if (( AUTO )); then
+    ANSWER=""
+    [[ -r "$AUTO_FILE" ]] && ANSWER=$(jq -r --arg k "$key" '
+      if has($k) then .[$k] | (if . == true then "y" elif . == false then "n" else tostring end)
+      else empty end' "$AUTO_FILE")
+    [[ -n "$ANSWER" ]] || ANSWER="$default"
+    say "${prompt}${ANSWER}   (auto: $key)"
+    return 0
+  fi
+  read -r -p "$prompt" ANSWER
+}
 
 # --- state ------------------------------------------------------------------
 # Each stage answers three questions: is it done, can it run, and what does the
@@ -450,8 +472,8 @@ need_purpose() { # sets PURPOSE, asking once and reusing it afterwards
 confirm_replace() { # confirm_replace <path> <description>
   [[ -e "$1" ]] || return 0
   say "$2 already exists."
-  read -r -p "Replace it? [y/N] " yn
-  [[ "$yn" == [yY]* ]]
+  ask rebuild "Replace it? [y/N] " n
+  [[ "$ANSWER" == [yY]* ]]
 }
 
 # The chosen keyword is confirmed here rather than edited into the JSON by hand.
@@ -537,10 +559,28 @@ action_keywords() {
     local -a sugarg=()
     [[ -s "$(suggested_file)" ]] && sugarg=("$(suggested_file)")
     if run_check keywords "$dir/keywords.json" "$dir/research.json" "${sugarg[@]}"; then
+      # Unattended, a choice that passes its check is kept, and reading the
+      # rationale moves to the audit after the article is finished.
+      (( AUTO )) && { say "auto: keyword choice accepted on a passing check"; return 0; }
       say ""
       say "Read the rationale against your research: it is the one field no check can verify."
       confirm_keywords "$dir" "${sugarg[@]}"
       return 0
+    fi
+    # Swapping to another researched term is a judgement, so unattended the only
+    # remedy is a reseed, and a second failure is left for a person.
+    if (( AUTO )); then
+      if (( seed >= 2 )); then
+        err "the keyword choice failed its check at both seeds: choosing another term is for a person."
+        # Left in place, the file would make the stage read done, and the next
+        # run would build a brief on a choice that failed its check.
+        mv "$dir/keywords.json" "$dir/keywords.rejected.json"
+        say "kept for reading at $dir/keywords.rejected.json"
+        RUN_STOP="decision"
+        return 1
+      fi
+      seed=2
+      continue
     fi
     # A swap is what fixes an invented or merged keyword, and a reseed is not, so
     # it is offered on the failure too.
@@ -554,8 +594,8 @@ action_keywords() {
       say "Edit $dir/research.json, or pick the primary keyword yourself in $dir/keywords.json"
       return 1
     }
-    read -r -p "Retry with seed 2? [Y/n] " yn
-    [[ "$yn" == [nN]* ]] && return 1
+    ask retry "Retry with seed 2? [Y/n] " y
+    [[ "$ANSWER" == [nN]* ]] && return 1
     seed=2
   done
 }
@@ -603,14 +643,17 @@ action_brief_stage() {
   say "To rebuild a stage and everything after it: bash scripts/brief_stages.sh $SLUG --redo <stage>"
 }
 
+# The range the merge accepts for a word count, typed or from auto.json.
+valid_word_count() { [[ "$1" =~ ^[0-9]+$ ]] && (( $1 >= 300 && $1 <= 6000 )); }
+
 action_brief() {
   local brief="$BRIEFS/$SLUG.json"
   local force=""
   if [[ -e "$brief" ]]; then
     jq . "$brief"
     say "A brief already exists. Replacing it discards any edit you made to it."
-    read -r -p "Replace it? [y/N] " yn
-    [[ "$yn" == [yY]* ]] || { say "kept"; return 0; }
+    ask rebuild "Replace it? [y/N] " n
+    [[ "$ANSWER" == [yY]* ]] || { say "kept"; return 0; }
     force="--force"
   fi
   bash "$ROOT/scripts/brief_stages.sh" "$SLUG" --merge ${force:+$force} || {
@@ -625,15 +668,18 @@ action_brief() {
   say ""
   say "word_count is $current, the median of the competitor pages that fetched."
   while true; do
-    read -r -p "Press enter to keep it, or type a different word count: " answer
+    ask word_count "Press enter to keep it, or type a different word count: " ""
+    answer="$ANSWER"
     [[ -z "$answer" ]] && break
-    if [[ "$answer" =~ ^[0-9]+$ ]] && (( answer >= 300 && answer <= 6000 )); then
+    if valid_word_count "$answer"; then
       jq --argjson w "$answer" '.word_count = $w' "$brief" > "$brief.new" && mv "$brief.new" "$brief"
       say "word_count set to $answer"
       run_check brief "$brief"
       break
     fi
     err "a whole number between 300 and 6000, or enter to keep $current"
+    # The same bad answer would come back from auto.json forever.
+    (( AUTO )) && { RUN_STOP="input"; return 1; }
   done
 }
 
@@ -661,8 +707,8 @@ action_outline() {
       return 1
     }
     say "A failure here is usually body text where only headings belong, most often the CTA."
-    read -r -p "Retry with seed $((seed + 1))? [Y/n] " yn
-    [[ "$yn" == [nN]* ]] && return 1
+    ask retry "Retry with seed $((seed + 1))? [Y/n] " y
+    [[ "$ANSWER" == [nN]* ]] && return 1
     seed=$((seed + 1))
   done
 }
@@ -672,8 +718,8 @@ action_draft() {
   local out="$OUTPUTS/$SLUG" fresh=""
   if [[ -r "$out/draft.md" ]]; then
     say "A draft exists. Rerunning keeps every part that already passed its check."
-    read -r -p "Redo every part from scratch instead? [y/N] " yn
-    [[ "$yn" == [yY]* ]] && fresh="--fresh"
+    ask fresh "Redo every part from scratch instead? [y/N] " n
+    [[ "$ANSWER" == [yY]* ]] && fresh="--fresh"
   fi
   say "one model call per part, then a fact check per part. This takes a minute or two."
   bash "$ROOT/scripts/draft_sections.sh" "$BRIEFS/$SLUG.json" ${fresh:+$fresh} || {
@@ -684,38 +730,115 @@ action_draft() {
     return 1
   }
   run_check draft "$out/draft.md" "$out/outline.md" "$BRIEFS/$SLUG.json" draft
+  local rc=$?
+  (( rc == 0 )) && return 0
+  (( AUTO )) && { auto_redo_numbers; return; }
+  return $rc
+}
+
+# Unattended, a draft holding numbers the facts do not support gets the parts that
+# hold them redrafted at fresh seeds, the way p redoes one part, and is checked
+# again. Accepting a number is a person vouching for it, so it never happens
+# here: numbers still there after two redrafts stop the run for a person.
+auto_redo_numbers() {
+  local out="$OUTPUTS/$SLUG" seed p n pn
+  local -a unknown parts hit
+  # A redraft can use three consecutive seeds when a part fails its own check, so
+  # the two rounds start three apart and never repeat a seed already tried.
+  for seed in 4 7; do
+    mapfile -t unknown < <(unsupported_numbers "$out/draft.md")
+    (( ${#unknown[@]} )) || { err "the draft check failed for a reason other than numbers, see above."; return 1; }
+    mapfile -t parts < <(drafted_parts)
+    hit=()
+    for p in "${parts[@]}"; do
+      pn=$(numbers < "$out/sections/$p.md")
+      for n in "${unknown[@]}"; do
+        grep -qxF "$n" <<< "$pn" && { hit+=("$p"); break; }
+      done
+    done
+    (( ${#hit[@]} )) || { err "the numbers ${unknown[*]} are in no single part, so there is nothing to redraft."; break; }
+    say "auto: redrafting ${hit[*]} at seed $seed, for the numbers ${unknown[*]}"
+    for p in "${hit[@]}"; do forget_part "$p"; done
+    DRAFT_SEED=$seed bash "$ROOT/scripts/draft_sections.sh" "$BRIEFS/$SLUG.json" || return 1
+    run_check draft "$out/draft.md" "$out/outline.md" "$BRIEFS/$SLUG.json" draft && return 0
+  done
+  mapfile -t unknown < <(unsupported_numbers "$out/draft.md")
+  (( ${#unknown[@]} )) || return 1
+  err "numbers the facts do not support are still in the draft after two redrafts."
+  say "They are for a person to vouch for (n at the menu) or cut:"
+  number_sentences "$out/draft.md" "${unknown[@]}" | sed 's/^/  /'
+  RUN_STOP="decision"
+  return 1
 }
 
 # One drafted part, redone at a fresh seed. The draft loop already regenerates a
 # part whose file is missing and re-stitches draft.md, so this deletes one part
 # and runs that loop. The seed has to move: the same seed returns the same text.
+# The drafted parts of this page by name, in order. Sidecars draft_sections.sh
+# keeps beside the parts start with "_": listing _outline_headings as a part
+# offered to delete it and redraft nothing.
+drafted_parts() {
+  local sec="$OUTPUTS/$SLUG/sections"
+  [[ -d "$sec" ]] || return 0
+  find "$sec" -maxdepth 1 -name '*.md' ! -name '_*' \
+    ! -name '*.block.md' ! -name '*.unverified.md' ! -name '*.ERROR.md' -printf '%f\n' | sort | sed 's/\.md$//'
+}
+
+forget_part() { # forget_part <name>: delete one part so the next draft run writes it again
+  local sec="$OUTPUTS/$SLUG/sections"
+  rm -f "$sec/$1.md" "$sec/$1.verify.json" "$sec/$1.unverified.md" "$sec/$1.verify.prompt.txt"
+}
+
+# unsupported_numbers <article>: each number in it that neither the facts nor the
+# outline holds, one per line. Built exactly as check.sh draft builds it, so the
+# two cannot disagree.
+unsupported_numbers() {
+  local known
+  known=$( { jq -r '.facts[], .word_count' "$BRIEFS/$SLUG.json"; cat "$OUTPUTS/$SLUG/outline.md"; } | numbers)
+  numbers < "$1" | grep -vxF -f <(printf '%s\n' "$known") || true
+}
+
+# number_sentences <article> <number>...: the sentences holding each number, at
+# most three per number, each printed once.
+number_sentences() {
+  local src="$1" n line seen
+  shift
+  seen=$(mktemp)
+  for n in "$@"; do
+    while IFS= read -r line; do
+      [[ -n "${line// /}" ]] || continue
+      grep -qxF "$line" "$seen" && continue
+      printf '%s\n' "$line" >> "$seen"
+      printf '%s\n' "$line"
+    done < <(sed 's/\([.!?]\) /\1\n/g' "$src" | grep -F "$n" | head -3)
+  done
+  rm -f "$seen"
+}
+
 action_redo_part() {
   need_router || return 1
   local out="$OUTPUTS/$SLUG" sec
   sec="$out/sections"
   [[ -d "$sec" ]] || { warn "no drafted parts yet: run the draft stage first."; return 0; }
   local -a parts=()
-  # Sidecars draft_sections.sh keeps beside the parts start with "_". Listing
-  # _outline_headings as a part offered to delete it and redraft nothing.
-  mapfile -t parts < <(find "$sec" -maxdepth 1 -name '*.md' ! -name '_*' \
-    ! -name '*.block.md' ! -name '*.unverified.md' ! -name '*.ERROR.md' -printf '%f\n' | sort)
+  mapfile -t parts < <(drafted_parts)
   (( ${#parts[@]} )) || { warn "no drafted parts yet: run the draft stage first."; return 0; }
   say ""
   say "${BOLD}Drafted parts${RESET}"
   local i=1 p
   for p in "${parts[@]}"; do
-    printf '  %2d  %-46s %s words\n' "$i" "${p%.md}" "$(grep -v '^#' "$sec/$p" | wc -w)"
+    printf '  %2d  %-46s %s words\n' "$i" "$p" "$(grep -v '^#' "$sec/$p.md" | wc -w)"
     i=$((i + 1))
   done
   local n
   read -r -p "Redo which part? (number, or enter to go back) " n
   [[ "$n" =~ ^[0-9]+$ ]] && (( n >= 1 && n <= ${#parts[@]} )) || { say "kept"; return 0; }
-  local name="${parts[$((n - 1))]%.md}"
+  local name="${parts[$((n - 1))]}"
   local seed
   read -r -p "Seed to draft it at [3]: " seed
   [[ "$seed" =~ ^[0-9]+$ ]] || seed=3
   say "redoing $name at seed $seed; every other part is left alone."
-  rm -f "$sec/$name.md" "$sec/$name.verify.json" "$sec/$name.unverified.md" "$sec/$name.verify.prompt.txt"
+  forget_part "$name"
   DRAFT_SEED="$seed" bash "$ROOT/scripts/draft_sections.sh" "$BRIEFS/$SLUG.json" || {
     err "the redraft stopped, see the message above."
     return 1
@@ -728,8 +851,8 @@ action_rewrite() {
   local out="$OUTPUTS/$SLUG" fresh=""
   if [[ -r "$out/final.md" ]]; then
     say "A final article exists. Rerunning keeps every edit that is newer than its input."
-    read -r -p "Redo every part from scratch instead? [y/N] " yn
-    [[ "$yn" == [yY]* ]] && fresh="--fresh"
+    ask fresh "Redo every part from scratch instead? [y/N] " n
+    [[ "$ANSWER" == [yY]* ]] && fresh="--fresh"
   fi
   say "editing each part for readability, then re-checking its facts..."
   bash "$ROOT/scripts/rewrite_sections.sh" "$BRIEFS/$SLUG.json" ${fresh:+$fresh} || {
@@ -748,10 +871,8 @@ action_accept_numbers() {
   src="$out/final.md"; [[ -r "$src" ]] || src="$out/draft.md"
   [[ -r "$src" && -r "$brief" && -r "$out/outline.md" ]] || {
     warn "this needs a brief, an outline and a draft."; return 0; }
-  local known unknown
-  # Built exactly as check.sh draft builds it, so the two cannot disagree.
-  known=$( { jq -r '.facts[], .word_count' "$brief"; cat "$out/outline.md"; } | numbers)
-  mapfile -t unknown < <(numbers < "$src" | grep -vxF -f <(printf '%s\n' "$known") || true)
+  local -a unknown
+  mapfile -t unknown < <(unsupported_numbers "$src")
   (( ${#unknown[@]} )) || { say "no flagged figures: every number in the article is in the facts or the outline."; return 0; }
   say ""
   say "${BOLD}Figures in the article that the facts do not support${RESET}"
@@ -760,16 +881,8 @@ action_accept_numbers() {
   # The sentences are collected before anything is asked: a read inside a loop fed
   # by a process substitution takes its answer from that stream, not the terminal.
   local -a candidates=() accepted=()
-  local n line seen
-  seen=$(mktemp); trap 'rm -f "$seen"' RETURN
-  for n in "${unknown[@]}"; do
-    while IFS= read -r line; do
-      [[ -n "${line// /}" ]] || continue
-      grep -qxF "$line" "$seen" && continue
-      printf '%s\n' "$line" >> "$seen"
-      candidates+=("$line")
-    done < <(sed 's/\([.!?]\) /\1\n/g' "$src" | grep -F "$n" | head -3)
-  done
+  local line
+  mapfile -t candidates < <(number_sentences "$src" "${unknown[@]}")
   local yn
   for line in "${candidates[@]}"; do
     say ""
@@ -914,8 +1027,14 @@ action_revise() {
 NEEDS_INPUT=" page collect "
 STOP_AFTER=" brief_stages "
 
+# RUN_STOP says why run_all stopped, for auto mode's exit code: empty when every
+# stage ran or was done, else blocked, input, failed, kept or read. A stage may
+# set it to decision or input before failing, and that reason is kept.
+RUN_STOP=""
+
 run_all() {
   local id idx=0 label ran=0
+  RUN_STOP=""
   for id in "${STAGE_IDS[@]}"; do
     label="${STAGE_LABELS[$idx]}"
     idx=$((idx + 1))
@@ -923,12 +1042,14 @@ run_all() {
     [[ "$STATE" == "done" ]] && continue
     if [[ "$STATE" == "blocked" ]]; then
       warn "stopped: $label is blocked ($DETAIL)"
+      RUN_STOP="blocked"
       return 1
     fi
     if [[ "$NEEDS_INPUT" == *" $id "* ]]; then
       say ""
       warn "stopped at $label, which needs you."
       say "Pick it from the menu when you are ready."
+      RUN_STOP="input"
       return 0
     fi
     local was="$STATE"
@@ -942,7 +1063,7 @@ run_all() {
       draft)        action_draft ;;
       rewrite)      action_rewrite ;;
       review)       action_review ;;
-    esac || { err "stopped: $label did not finish."; return 1; }
+    esac || { err "stopped: $label did not finish."; RUN_STOP="${RUN_STOP:-failed}"; return 1; }
     ran=$((ran + 1))
     # A stale stage you chose to keep stays stale, and every later stage is
     # stale because of it, so carrying on would only rebuild them from what you
@@ -953,12 +1074,15 @@ run_all() {
         say ""
         warn "stopped: you kept the stale $label, so the stages after it would be rebuilt from it."
         say "Replace it, or pick a later stage from the menu to rebuild on purpose."
+        RUN_STOP="kept"
         return 0
       fi
     fi
-    if [[ "$STOP_AFTER" == *" $id "* ]]; then
+    # Unattended, the brief stages are read by the audit at the end instead.
+    if (( ! AUTO )) && [[ "$STOP_AFTER" == *" $id "* ]]; then
       say ""
       warn "stopped after $label so you can read it. Choose a again to carry on."
+      RUN_STOP="read"
       return 0
     fi
   done
@@ -1093,8 +1217,136 @@ pick_slug() {
   done
 }
 
+# --- unattended -------------------------------------------------------------
+# ./seo --auto <slug> runs every remaining stage with no one at the keyboard, for
+# a scheduler or an agent, and exits with a code it can act on. Answers come from
+# the files the menu already reads, then research/<slug>/auto.json, then the safe
+# default in each ask: never replace, retry to the seed limit, resume rather than
+# redo. Nothing here accepts a flagged number or swaps a keyword, which stay a
+# person's decisions.
+AUTO_MISSING_INPUT=10   # an input file is missing or unreadable
+AUTO_DECISION=11        # a decision only a person should make
+AUTO_STAGE_FAILED=12    # a stage did not finish: a check still failing, or a call that errored
+AUTO_ROUTER=13          # the router is not serving qwen
+
+auto_value() { # auto_value <key>: the auto.json value as text, empty when unset
+  { [[ -r "$AUTO_FILE" ]] && jq -r --arg k "$1" '.[$k] // empty | tostring' "$AUTO_FILE"; } || true
+}
+
+# Every input a remaining stage will read, checked before any fetch or model
+# call. The questions behind these files are not routed through ask, so a missing
+# one would otherwise be read from a closed stdin and recorded as an empty answer:
+# a general article, or a page with no facts, that nobody chose.
+auto_preflight() {
+  local dir="$RESEARCH/$SLUG" t="" live kw bs n_inputs n_urls=0
+  local -a missing=()
+  live=$(auto_value live_url)
+  [[ -z "$live" || "$live" =~ ^https?:// ]] || missing+=("live_url in $AUTO_FILE is not an http(s) URL: $live")
+  if [[ ! -r "$dir/research.json" ]]; then
+    n_inputs=$(find "$dir/inputs" -maxdepth 1 -type f \( -name '*.csv' -o -name '*.tsv' -o -name '*.txt' \) 2>/dev/null | wc -l)
+    [[ -r "$dir/competitors.txt" ]] && n_urls=$(grep -cve '^[[:space:]]*$' -e '^[[:space:]]*#' "$dir/competitors.txt")
+    (( n_inputs > 0 )) || missing+=("$dir/inputs/: no keyword export")
+    (( n_urls > 0 )) || missing+=("$dir/competitors.txt: no competitor URL")
+  fi
+  stage_status keywords; kw="$STATE"
+  stage_status brief_stages; bs="$STATE"
+  if [[ "$kw" != done || "$bs" != done ]]; then
+    [[ -s "$(purpose_file)" ]] || missing+=("$(purpose_file): the page purpose, in one line")
+    if [[ -r "$(type_file)" ]]; then
+      t=$(tr -d '[:space:]' < "$(type_file)")
+      [[ -z "$t" || -r "$ROOT/prompts/brief-type-$t.md" ]] \
+        || missing+=("$(type_file): unknown content type $t (review, roundup, guide, how-to, or empty)")
+    else
+      missing+=("$(type_file): the content type (review, roundup, guide, how-to, or empty for a general article)")
+    fi
+  fi
+  [[ "$kw" != done && ! -r "$(suggested_file)" ]] \
+    && missing+=("$(suggested_file): keywords to consider, one per line, empty for none")
+  if [[ "$bs" != done ]]; then
+    if [[ ! -e "$(facts_file)" ]]; then
+      missing+=("$(facts_file): what the page may state as fact, one per line, empty for none")
+    elif [[ "$t" == review || "$t" == roundup ]] && ! grep -q '[^[:space:]]' "$(facts_file)"; then
+      missing+=("$(facts_file): a $t names products, so it needs them as facts")
+    fi
+  fi
+  (( ${#missing[@]} == 0 )) && return 0
+  local m
+  for m in "${missing[@]}"; do err "missing input: $m"; done
+  return 1
+}
+
+# The page check and the collection ask questions at every turn in the menu, so
+# auto mode runs the same two scripts the menu runs, with the answers from disk.
+auto_page() {
+  local dir="$RESEARCH/$SLUG" live
+  [[ -r "$dir/page.json" ]] && return 0
+  mkdir -p "$dir"
+  live=$(auto_value live_url)
+  say ""
+  say "--- Page check"
+  if [[ -n "$live" ]]; then
+    say "auto: the page is live at $live"
+    bash "$ROOT/scripts/fetch_page.sh" "$live" "$dir/page.json" || {
+      err "missing input: the live page could not be fetched: $live"
+      return $AUTO_MISSING_INPUT
+    }
+  else
+    say "auto: no live_url in $AUTO_FILE, so this is a new page"
+    bash "$ROOT/scripts/fetch_page.sh" --absent "$dir/page.json" || return $AUTO_STAGE_FAILED
+  fi
+}
+
+auto_collect() {
+  local dir="$RESEARCH/$SLUG" rc
+  [[ -r "$dir/research.json" ]] && return 0
+  say ""
+  say "--- Collect research"
+  bash "$ROOT/scripts/research_collect.sh" "$SLUG"
+  rc=$?
+  # 3 and 4 are an export with no keyword column or one that cannot be parsed.
+  (( rc == 3 || rc == 4 )) && { err "missing input: an export could not be read, see above"; return $AUTO_MISSING_INPUT; }
+  (( rc == 0 )) || return $AUTO_STAGE_FAILED
+  run_check research "$dir/research.json" || return $AUTO_STAGE_FAILED
+}
+
+auto_main() {
+  say "seo --auto $SLUG, $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if [[ -e "$AUTO_FILE" ]] && ! jq -e 'type == "object"' "$AUTO_FILE" > /dev/null 2>&1; then
+    err "missing input: $AUTO_FILE is not a JSON object"
+    return $AUTO_MISSING_INPUT
+  fi
+  # Checked before anything runs: found at the merge, the brief would already be
+  # written with the median, and a rerun would never ask again.
+  local wc
+  wc=$(auto_value word_count)
+  if [[ -n "$wc" ]] && ! valid_word_count "$wc"; then
+    err "missing input: word_count in $AUTO_FILE is $wc, not a whole number between 300 and 6000"
+    return $AUTO_MISSING_INPUT
+  fi
+  auto_preflight || return $AUTO_MISSING_INPUT
+  need_router || return $AUTO_ROUTER
+  # The plan is logged before anything runs: every stage not done runs, in order.
+  say "plan:"
+  local id idx=0
+  for id in "${STAGE_IDS[@]}"; do
+    stage_status "$id"
+    printf '  %-18s %-7s %s\n' "${STAGE_LABELS[$idx]}" "$STATE" "$DETAIL"
+    idx=$((idx + 1))
+  done
+  auto_page || return $?
+  auto_collect || return $?
+  run_all
+  case "$RUN_STOP" in
+    "")            say "auto: finished"; return 0 ;;
+    blocked|input) return $AUTO_MISSING_INPUT ;;
+    kept|read|decision) return $AUTO_DECISION ;;
+    *)             return $AUTO_STAGE_FAILED ;;
+  esac
+}
+
 # --- main -------------------------------------------------------------------
 
+if [[ "${1:-}" == "--auto" ]]; then AUTO=1; shift; fi
 SLUG="${1:-}"
 
 # The slug is checked before the terminal test, so a piped run refuses a bad slug
@@ -1102,6 +1354,17 @@ SLUG="${1:-}"
 if [[ -n "$SLUG" ]] && ! valid_slug "$SLUG"; then
   err "not a valid slug: $SLUG"
   exit 2
+fi
+
+if (( AUTO )); then
+  [[ -n "$SLUG" ]] || { echo "usage: seo.sh --auto <slug>" >&2; exit 2; }
+  # The log is plain text, and stdin is closed so a prompt that was missed by
+  # ask gets EOF and its default instead of waiting for nobody.
+  BOLD=""; DIM=""; RESET=""; GREEN=""; YELLOW=""; RED=""
+  AUTO_FILE="$RESEARCH/$SLUG/auto.json"
+  mkdir -p "$OUTPUTS/$SLUG"
+  auto_main < /dev/null 2>&1 | tee -a "$OUTPUTS/$SLUG/run.log"
+  exit "${PIPESTATUS[0]}"
 fi
 
 if [[ ! -t 0 ]]; then

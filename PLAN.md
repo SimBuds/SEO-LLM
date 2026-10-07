@@ -55,8 +55,11 @@ User in Claude Code
   ├─ /seo-outline <brief>  prompts/outline.md                                → outline.md
   ├─ /seo-draft   <brief>  scripts/draft_sections.sh: per-part call
   │                        (intro/section/conclusion.md) + verify.md          → sections/*, draft.md
-  └─ /seo-rewrite <brief>  scripts/rewrite_sections.sh: per-part rewrite.md
-                           (REWRITE_MODEL) + verify.md                        → rewrite/*, final.md
+  ├─ /seo-rewrite <brief>  scripts/rewrite_sections.sh: per-part rewrite.md
+  │                        (REWRITE_MODEL) + verify.md                        → rewrite/*, final.md
+  └─ /seo-audit <slug>     Claude Code reads final.md, no model call          → audit.md
+
+./seo --auto <slug>        the menu's stages unattended, answers from files, exit code for the caller
 ```
 
 Phases 6 to 13, 16 to 32 and 33 to 38 are built, so the research stage runs end to end (page check, competitor and export collection, keyword choice, a staged brief builder, the research detail reaching the outline), and `./seo` is the front door that walks a new page through its inputs and then runs any stage. Planned next are a metadata pass writing `meta.json` (Phase 14), and a `/seo-generate` skill (Phase 15). The knowledge-base half of Phase 15 rested on `SEO-GUIDE.md`, which was removed from the repo on 2026-09-22, so it needs a new source before it means anything.
@@ -72,7 +75,7 @@ No Python app. No workflow engine. No SQLite.
 ```
 SEO-LLM/
 ├── .claude/
-│   ├── skills/              # <name>/SKILL.md per command. Built: /seo-research, /seo-keywords, /seo-brief, /seo-ingest, /seo-outline, /seo-draft, /seo-rewrite. Planned: /seo-metadata, /seo-generate
+│   ├── skills/              # <name>/SKILL.md per command. Built: /seo-research, /seo-keywords, /seo-brief, /seo-ingest, /seo-outline, /seo-draft, /seo-rewrite, /seo-audit. Planned: /seo-metadata, /seo-generate
 │   └── settings.json        # allow the entry scripts, jq, extractors, and Bash(curl -s localhost:8080/models)
 ├── seo                      # launcher at the repo root: ./seo [slug] → scripts/seo.sh
 ├── prompts/
@@ -440,6 +443,16 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - Files: `scripts/lib_parts.sh`, `scripts/seo.sh`.
 - 83: `unbold()` ran `sed -i` on every part, and `sed -i` writes a new file even when nothing matches. A resumed draft therefore gave every skipped part a new mtime, and the rewrite, which skips a part only when its edit is newer than its input, re-edited all 8 parts after `p` redid one. `unbold()` now rewrites a part only when it holds bold outside a heading. Measured on the fountain slug: 8 of 8 mtimes changed before, 0 of 8 after, and `p` followed by `a` re-edited 1 part instead of 8.
 - 84: `p` listed the `_outline_headings` sidecar as a part. Files starting with `_` are no longer offered.
+
+### Phases 85 to 90: Running unattended (done 2026-10-07)
+- Files: `scripts/seo.sh`, `.claude/skills/seo-audit/SKILL.md`, `.claude/settings.json`, `README.md`, `INSTRUCTIONS.md`, `AGENTS.md`.
+- Casey's approach, chosen 2026-10-01 over a separate runner script and over Claude Code running every stage: `./seo --auto <slug>` runs the menu's own stages, and Claude Code judges only the finished article. A scheduler or an agent such as Hermes writes the inputs and acts on the exit code. The local model still generates and Claude Code still audits.
+- One `ask` helper replaces each prompt that has a safe default. From the keyboard it is the same read, and the interactive transcripts were measured identical before and after every phase. Unattended it reads `research/<slug>/auto.json` or the default.
+- Every input is checked before any fetch or model call, because the setup questions are not routed through `ask` and a closed stdin would record an empty type or no facts that nobody chose.
+- Two decisions never happen unattended: accepting a flagged number, and swapping the keyword. A draft with numbers the facts do not support gets only those parts redrafted, at seeds 4 and 7, then exits 11. Measured on the fountain page: a "45 months" claim cleared at seed 4, and the noise section brought back the unsourced "below 30 dB" at both seeds, which is why that stop exists.
+- A keyword choice that fails at both seeds is renamed to `keywords.rejected.json`: left in place it read as done, and the next run built a brief on it.
+- `/seo-audit` fails text broken as written as well as unsupported specifics. Its first run passed the how-to article whose cleaning steps the fact checker had turned into "Clean the parts. Clean the parts.", and that PASS would have sent a broken article on. The cause is on the Deferred list.
+- The settings rule is `Edit(outputs/**/audit.md)`. A leading `/` anchors to `.claude/` and denied the write. Claude Code ignores a project allowlist in an untrusted workspace, so the documented audit call passes `--settings .claude/settings.json`.
 
 ### Phase 15: Docs + SEO knowledge base
 - Files: `README.md`, `docs/google/{helpful-content,eeat,semantic-search,ai-content-guidelines}.md`, link from system prompt.

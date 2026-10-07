@@ -29,9 +29,15 @@ User in Claude Code
   │    └─ scripts/draft_sections.sh: one scripts/llm_call.sh call per part, then a fact-check call
   │         prompts/intro.md, prompts/section.md (each H2 + FAQ), prompts/conclusion.md, prompts/verify.md
   │         └─ writes outputs/<slug>/sections/*.md, stitched into draft.md
-  └─ /seo-rewrite briefs/<brief>.json        (Phase 5 — edit for readability)
-       └─ scripts/rewrite_sections.sh: one call per part, prompts/rewrite.md, then a fact-check call
-            └─ writes outputs/<slug>/rewrite/*.md, stitched into final.md
+  ├─ /seo-rewrite briefs/<brief>.json        (Phase 5 — edit for readability)
+  │    └─ scripts/rewrite_sections.sh: one call per part, prompts/rewrite.md, then a fact-check call
+  │         └─ writes outputs/<slug>/rewrite/*.md, stitched into final.md
+  └─ /seo-audit <slug>                       (Phase 89 - Claude Code judges the finished article)
+       └─ reads final.md against the facts and research, no model call
+            └─ writes outputs/<slug>/audit.md
+
+./seo --auto <slug>                          (Phases 85-88 - every remaining stage, unattended)
+  └─ the same stages as the menu, answers from files, exit code for the caller
 
 Every scripts/llm_call.sh call → POST localhost:8080/v1/chat/completions
   model qwen, system message prompts/system.md, thinking off
@@ -108,7 +114,7 @@ SEO-LLM/
 3. Open this repo in Claude Code and accept the trust dialog on first run.
    Confirm the commands are available by typing `/` and looking for
    `seo-research`, `seo-keywords`, `seo-brief`, `seo-ingest`, `seo-outline`,
-   `seo-draft`, and `seo-rewrite`.
+   `seo-draft`, `seo-rewrite`, and `seo-audit`.
 4. Get a brief into `briefs/`, either way:
    - **From a JSON brief you write.** Copy [briefs/example.json](briefs/example.json) and edit it.
    - **From a document.** Run `/seo-ingest path/to/source.{docx,pdf,md,txt}`, which writes `briefs/<slug>.json` for you to review and edit.
@@ -127,6 +133,8 @@ SEO-LLM/
 then shows every stage of that page with its state and runs the one you pick. It
 is a wrapper around `scripts/seo.sh`, which can still be called directly, and it
 finds the repository from its own path, so it works from any directory.
+`./seo --auto <slug>` runs the same stages with no one at the keyboard (see
+[Running unattended](#running-unattended)).
 
 ```bash
 # Runs in: local terminal
@@ -625,6 +633,8 @@ orphan its outline.
 | `research/<slug>/keywords.json` | `/seo-keywords` | The target keyword, intent, business potential, questions and subtopics |
 | `research/<slug>/type.txt` | `/seo-keywords` | The content type, recorded once, empty when declined |
 | `research/<slug>/suggested.txt` | `/seo-keywords` | Keywords you suggested, one per line, recorded once and empty when you suggested none |
+| `research/<slug>/auto.json` | you or a scheduler | The answers `./seo --auto` cannot read from any other file (see Running unattended) |
+| `research/<slug>/keywords.rejected.json` | `./seo --auto` | A keyword choice that failed its check at both seeds, set aside for a person |
 | `research/<slug>/brief-stages/purpose.txt` | `/seo-brief` | The one-line page purpose, recorded once and reused by every stage |
 | `research/<slug>/brief-stages/NN-<stage>.json` | `/seo-brief` | One approved brief stage, with its `.prompt.txt`, `.schema.json` and `.prior.json` beside it |
 | `research/_cache/*.body` | `/seo-research` | Cached raw HTML and response status, gitignored |
@@ -644,6 +654,8 @@ orphan its outline.
 | `outputs/<slug>/rewrite/NN-<heading>.{verify.json,verify.prompt.txt,unverified.md}` | `/seo-rewrite` | The fact check of an accepted edit, as in `sections/` |
 | `outputs/<slug>/rewrite/NN-<heading>.rejected-seedN.md` | `/seo-rewrite` | An edit that failed `check.sh rewrite`, kept for inspection |
 | `outputs/<slug>/final.md` | `/seo-rewrite` | The stitched, edited article |
+| `outputs/<slug>/run.log` | `./seo --auto` | Each unattended run's plan and output, appended |
+| `outputs/<slug>/audit.md` | `/seo-audit` | The verdict on `final.md`, with every FAIL quoted |
 
 `outputs/` and `briefs/_ingest/` are gitignored. The `_`-prefixed prompt files are
 kept on purpose: when a result looks wrong, they show exactly what the model was
@@ -677,6 +689,85 @@ bash scripts/check.sh draft outputs/example/final.md outputs/example/outline.md 
 # 3. Check a brief against the schema the way /seo-ingest does.
 bash scripts/check.sh brief briefs/example.json
 ```
+
+## Running unattended
+
+`./seo --auto <slug>` runs every remaining stage with no one at the keyboard, for a
+scheduler or an agent such as Hermes. It reads every answer from files instead of
+asking, takes the safe default for each yes or no (never replace an existing
+artifact, retry to the seed limit, resume rather than redo), and exits with a code
+the caller can act on. `/seo-audit <slug>` then reads the finished article. The
+local model generates and Claude Code audits, here as everywhere else.
+
+The caller writes the inputs first, at the paths the menu already reads:
+
+| Path | What it holds |
+| --- | --- |
+| `research/<slug>/inputs/*.csv` | The keyword exports, as downloaded |
+| `research/<slug>/competitors.txt` | The competitor URLs, one per line |
+| `research/<slug>/brief-stages/purpose.txt` | The page purpose, in one line |
+| `research/<slug>/type.txt` | `review`, `roundup`, `guide`, `how-to`, or empty for a general article |
+| `research/<slug>/suggested.txt` | Keywords to consider, one per line, empty for none |
+| `briefs/_ingest/<slug>.txt` | What the page may state as fact, one per line. Empty means no facts, which a review or a roundup cannot have |
+| `research/<slug>/site.txt` | Optional: your site's URL when the page is not live, so its sitemap is read |
+| `research/<slug>/auto.json` | Optional: the answers in the next table |
+
+Every key in `auto.json` is optional:
+
+| Key | Default | What it answers |
+| --- | --- | --- |
+| `live_url` | none, so a new page | The page's URL when it is already live |
+| `word_count` | the competitor median | The brief's length, a whole number from 300 to 6000 |
+| `rebuild` | `false` | Whether to replace a stale keyword choice, outline or brief |
+| `fresh` | `false` | Whether the draft or the rewrite redoes every part instead of resuming |
+| `retry` | `true` | Whether a failed keyword or outline check is retried at the next seed |
+
+The exit code is the contract:
+
+| Code | Meaning | What the caller does |
+| --- | --- | --- |
+| 0 | `final.md` is written and passes its check | Run the audit |
+| 10 | An input is missing or invalid, each one named | Supply it and run again |
+| 11 | A decision for a person: numbers the facts do not support after two redrafts, a keyword choice failing at both seeds, or a stale artifact with `rebuild` false | Hand the page to a person |
+| 12 | A stage did not finish: a check still failing at the seed limit, or a call that errored | Read the log |
+| 13 | The router is not serving `qwen` | Fix the router, then run again |
+| 2 | No slug, or not a valid one | Fix the call |
+
+Every input is checked before anything is fetched or a model is called, so a 10
+costs nothing. Output goes to the terminal and is appended to
+`outputs/<slug>/run.log`, which opens with the stages it plans to run and their
+state at that moment. A stage after one that has not run yet reads `blocked` there,
+until its input exists. A keyword choice that fails at both seeds is moved to
+`keywords.rejected.json`, so a rerun does not build a brief on it. A draft holding
+numbers the facts do not support gets only the parts holding them redrafted, at
+seeds 4 and 7, before the run stops with 11.
+
+Two decisions never happen unattended: a flagged number is never accepted as a
+fact, and the keyword is never swapped for another term. Both stay with a person,
+through `n` and the keyword stage at the menu.
+
+The scheduler runs the pipeline, then the audit, from the repo root:
+
+```bash
+# Runs in: local terminal (a cron entry or an agent runs the same lines)
+slug=example-page   # edit: the page to run
+cd ~/Apps/SEO-LLM \
+  && ./seo --auto "$slug" \
+  && claude -p "/seo-audit $slug" --settings .claude/settings.json \
+  && grep -qx 'Verdict: PASS' "outputs/$slug/audit.md" \
+  && echo "ready to read: outputs/$slug/final.md"
+```
+
+`/seo-audit` writes `outputs/<slug>/audit.md` and edits nothing else. Line 2 is
+always `Verdict: PASS` or `Verdict: FAIL`. A FAIL is a `check.sh draft` failure, a
+business specific the facts do not state, text broken as written (such as a stub
+the fact checker left), or a keyword rationale the research contradicts, each
+quoted. Notes never change the verdict. `--settings .claude/settings.json` hands
+the project's allowlist to Claude Code explicitly, because a workspace whose trust
+dialog was never accepted ignores it, and the audit then cannot run its check or
+write its file. A PASS means the article is worth a person's reading, not that it
+is ready to publish: first-hand detail, original data and a named author still
+come from a person, and publishing is always theirs.
 
 ## Troubleshooting
 

@@ -16,7 +16,8 @@
       "Bash(./seo:*)",
       "Bash(bash scripts/fetch_page.sh:*)",
       "Bash(bash scripts/research_collect.sh:*)",
-      "Bash(bash scripts/brief_stages.sh:*)"
+      "Bash(bash scripts/brief_stages.sh:*)",
+      "Edit(outputs/**/audit.md)"
     ]
   }
 }

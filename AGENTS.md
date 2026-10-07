@@ -1287,6 +1287,15 @@ repos, and one ended in a colon with no template after it.)
   Follow the skill's steps against the real router and report observed output.
   Those runs write to a scratch mirror of `briefs/` and `outputs/`, never to
   the repo directories, and the scratch files are removed before handoff.
+- **`./seo --auto <slug>` is the sanctioned unattended mode.** It fetches only the
+  URLs the user listed (competitors.txt, the sitemap of site.txt or of the live
+  page, and auto.json's live_url), all through fetch_page.sh with its robots.txt
+  check, per-host delay and cache. It writes only inside research/, briefs/ and
+  outputs/, publishes nothing, never accepts a flagged number or swaps a keyword,
+  and logs its plan to outputs/<slug>/run.log before acting. Any other unattended
+  outbound request still falls under the universal rule. (Approved by Casey
+  2026-10-01. The universal body allows headless outbound requests only for dry
+  runs, and a scheduler running the pipeline needs this exception.)
 - **Known environment gaps as of 2026-09-15:** `pandoc` is not installed, so
   `.docx` ingest cannot run. `pdftotext` and `jq` are present. Report a missing
   extractor to Casey rather than installing anything, per tier 0.

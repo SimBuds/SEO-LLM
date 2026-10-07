@@ -8,6 +8,9 @@ the same files.
   its state. See "The menu" below.
 - **The seven `/seo-*` commands in Claude Code**, run in order. Each one writes
   files that the next one reads, and this document walks through them.
+  `/seo-audit` then judges the finished article.
+- **`./seo --auto <slug>`**, unattended, for a scheduler or an agent. It runs the
+  menu's stages with every answer read from files. See "Running unattended" below.
 
 ```
 /seo-research <slug>  ──▶ research/<slug>/page.json + research.json
@@ -31,6 +34,9 @@ outputs/<slug>/sections/*  →  draft.md  │  all stages read the brief's `fact
    │  /seo-rewrite briefs/<slug>.json   │
    ▼                                    │
 outputs/<slug>/rewrite/*   →  final.md ◀┘
+   │  /seo-audit <slug>   (Claude Code, no model call)
+   ▼
+outputs/<slug>/audit.md   Verdict: PASS or FAIL
 ```
 
 The `<slug>` is the brief's file name without `.json`, so a page's research, its document, its brief and its outputs all share one name.
@@ -149,6 +155,16 @@ Editing a stage file is usually better than rerunning it, because a rerun is a f
 6. **Output:** the parts are joined into `final.md`, and `check.sh draft` runs against the real target. Rerunning skips edits that are newer than their input and still pass. `--fresh` redoes every part.
 7. **Final review:** Claude Code compares `final.md` with `draft.md` and the facts. It notes which rejected issues were fixed and any claim the facts don't support.
 
+## 8. `/seo-audit <slug>`: `final.md` → `audit.md`
+
+1. **Preconditions:** `final.md`, the outline, the brief, `research.json` and `keywords.json` exist. With no `final.md` it stops and writes nothing, so no verdict exists for a finished article that is not there.
+2. **The check:** `check.sh draft` on `final.md`. Every FAIL line fails the audit.
+3. **The reading**, which no script can do:
+   - every business specific the facts do not state, and every fact strengthened
+   - text broken as written: a stub the fact checker left, the same stub twice, a fragment, or a pronoun with nothing to refer to
+   - each claim the keyword rationale makes about the research
+4. **Output:** `outputs/<slug>/audit.md`, with `Verdict: PASS` or `Verdict: FAIL` on line 2 and every FAIL quoted. Notes never change the verdict. It edits no other file.
+
 ## The menu
 
 From the menu, `n` accepts a flagged figure into the facts and rebuilds the brief, `p` redoes one drafted part, and `e` changes a recorded answer.
@@ -191,6 +207,19 @@ facts the page may state once each and reuses them, with `e` to change any of th
 later and clear whatever was built on the old answer. It checks the router before any model call, offers a reseed when
 a check fails rather than retrying behind your back, and always asks before
 replacing an artifact.
+
+## Running unattended
+
+`./seo --auto <slug>` runs every remaining stage for a scheduler or an agent such
+as Hermes. The inputs are the same files the menu reads, plus an optional
+`research/<slug>/auto.json` for the live URL, the word count and whether to
+rebuild. Every input is checked before anything runs, each yes or no takes its safe
+default, and the exit code says what happened: 0 finished, 10 an input missing, 11
+a decision for a person, 12 a stage that did not finish, 13 the router down. A
+flagged number is redrafted, never accepted, and the keyword is never swapped.
+After a 0 the caller runs `claude -p "/seo-audit <slug>" --settings
+.claude/settings.json` from the repo root. README.md "Running unattended" has the
+input table, the keys and a scheduler example.
 
 ## Shared pieces
 
@@ -265,10 +294,17 @@ Driven from Claude Code, it is the seven commands in order:
 | `outputs/<slug>/draft.md` | draft | The joined draft |
 | `outputs/<slug>/rewrite/NN-<heading>.*` | rewrite | Prompt, edited part, `.verify.json`, rejected attempts |
 | `outputs/<slug>/final.md` | rewrite | The finished article |
+| `research/<slug>/auto.json` | you or a scheduler | The answers `./seo --auto` reads that no other file holds |
+| `outputs/<slug>/run.log` | `./seo --auto` | Each unattended run's plan and output |
+| `outputs/<slug>/audit.md` | audit | The verdict on `final.md` |
 
 The prompt files are kept on purpose. When a result looks wrong, they show exactly what the model was asked.
 
 ## What still needs a person
+
+An unattended run still needs a person for the inputs it cannot make up (the
+keyword exports, the competitor URLs and the facts), for every exit 11, and for
+reading the article the audit passed.
 
 - **Finding the competitors.** You search Google and paste the top 3 to 5 URLs. The pipeline never fetches a results page.
 - **The call to action.** Stage 3 is where the model is most likely to promise something you do not offer, such as a downloadable checklist or a free trial. Read it before merging.
