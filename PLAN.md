@@ -109,6 +109,8 @@ SEO-LLM/
 ├── research/                # <slug>/page.json, plus inputs/ and _cache/ (cache gitignored)
 ├── briefs/                  # JSON inputs
 ├── outputs/                 # <brief-slug>/{outline.md, sections/, draft.md, rewrite/, final.md}
+├── tests/
+│   └── auto_contract.sh     # the --auto contract, pinned with a fake curl in place of the router
 ├── docs/
 │   └── google/              # planned (Phase 7): helpful-content.md, eeat.md, semantic-search.md, ai-content-guidelines.md
 ├── AGENTS.md
@@ -470,7 +472,7 @@ After each phase:
 3. Inspect `outputs/<slug>/` for the artifacts that phase promised.
 4. Spot-check generated text for SEO structure (H2s, keyword presence, no robotic intros).
 
-No test framework in MVP. Generation is the test.
+No test framework in MVP, and generation is still the test of what the model writes. What an unattended run promises its caller is pinned separately by `tests/auto_contract.sh` (added in Phase 91, 2026-11-01): which file a failed stage leaves and the exit code the run ends with. A fake `curl` stands in for the router, so it runs without the GPU and belongs after any change to `scripts/seo.sh` or the scripts it drives.
 
 ---
 

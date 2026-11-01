@@ -550,11 +550,16 @@ action_keywords() {
       cat "$ROOT/prompts/keywords-suggested.md" >> "$dir/_keywords_prompt.txt"
       cat "$(suggested_file)" >> "$dir/_keywords_prompt.txt"
     fi
+    # The reply lands beside the file and moves in only on success. Redirected
+    # straight into keywords.json, a failed call left a zero-byte file that the
+    # next run read as a finished keyword choice and built a brief on.
     bash "$ROOT/scripts/llm_call.sh" "$dir/_keywords_prompt.txt" 0.2 "$seed" \
-         "$ROOT/prompts/keywords.schema.json" > "$dir/keywords.json" || {
+         "$ROOT/prompts/keywords.schema.json" > "$dir/keywords.json.new" || {
+      rm -f "$dir/keywords.json.new"
       err "the call failed, see the message above. The prompt is kept at $dir/_keywords_prompt.txt"
       return 1
     }
+    mv "$dir/keywords.json.new" "$dir/keywords.json"
     jq . "$dir/keywords.json"
     local -a sugarg=()
     [[ -s "$(suggested_file)" ]] && sugarg=("$(suggested_file)")
@@ -693,10 +698,14 @@ action_outline() {
     say "calling the model (temperature 0.3, seed $seed)..."
     bash "$ROOT/scripts/fill_prompt.sh" "$ROOT/prompts/outline.md" --brief "$BRIEFS/$SLUG.json" \
       > "$out/_outline_prompt.txt" \
-    && bash "$ROOT/scripts/llm_call.sh" "$out/_outline_prompt.txt" 0.3 "$seed" > "$out/outline.md" || {
+    && bash "$ROOT/scripts/llm_call.sh" "$out/_outline_prompt.txt" 0.3 "$seed" > "$out/outline.md.new" || {
+      # Same reason as the keyword stage: a failed call must not leave an empty
+      # outline.md for the next run to read as done, or wipe the one replaced.
+      rm -f "$out/outline.md.new"
       err "the call failed, see the message above."
       return 1
     }
+    mv "$out/outline.md.new" "$out/outline.md"
     clean_outline "$out/outline.md"
     cat "$out/outline.md"
     if run_check outline "$out/outline.md" "$BRIEFS/$SLUG.json"; then

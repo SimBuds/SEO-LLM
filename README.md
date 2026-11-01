@@ -76,6 +76,7 @@ SEO-LLM/
 ├── research/           # per-page research: <slug>/page.json, inputs/, _cache/ (cache gitignored)
 ├── briefs/             # user inputs (JSON)
 ├── outputs/            # generated articles, one directory per brief (gitignored)
+├── tests/              # auto_contract.sh: pins the ./seo --auto contract, with a fake curl in place of the router
 ├── AGENTS.md           # workflow contract for any AI agent in this repo
 ├── INSTRUCTIONS.md     # stage-by-stage walk through the whole pipeline
 ├── PLAN.md             # architecture + phased MVP plan
@@ -813,5 +814,7 @@ Other things worth knowing:
 The fourth pillar, `IMPLEMENT.md`, is the execution tracker and holds the live state: which phase is active, what is done, what is deferred. It is untracked and gitignored on purpose, so a fresh clone has none. Its absence means no work is in flight, not that state was lost. Create it from the skeleton in `AGENTS.md` when you start a phase.
 
 The short version: one phase at a time, at most five files per phase, walking-skeleton first, verify end-to-end against the live llama.cpp router, and end each phase with the literal handoff line.
+
+`bash tests/auto_contract.sh` pins what `./seo --auto` promises a caller: the file a failed stage leaves behind and the exit code the run ends with. It needs no router, no network and no GPU. A fake `curl` first on `PATH` stands in for the router, and every run writes to a scratch tree that is removed afterwards. It prints PASS or FAIL per case and exits 1 if any failed. Run it after any change to `scripts/seo.sh` or the scripts it drives. It says nothing about what the model writes, so it does not replace the live run.
 
 This repo is SEO only. The tutor application that used to live alongside it now has its own repo, `~/Apps/Tutor-LLM`, and shares no code with this one.
