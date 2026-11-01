@@ -31,7 +31,8 @@ done
 # FAKE_POST and FAKE_MODELS are comma lists, one entry per call in order, the
 # last entry repeating. A POST entry is down (curl 7), noload (HTTP 500, the
 # model failed to load), toobig (HTTP 400, prompt over the context), timeout
-# (curl 28) or reply:<file> (the file's text as the model's reply). A /models entry is ok,
+# (curl 28), probe (logs whether the file FAKE_PROBE exists, then curl 7) or
+# reply:<file> (the file's text as the model's reply). A /models entry is ok,
 # down, or noqwen (a router up but serving only gemma). Counters live in
 # FAKE_DIR so each run starts from call 1.
 mkdir -p "$WORK/bin"
@@ -65,6 +66,8 @@ case "$url" in
       noload) printf '%s' '{"error":{"code":500,"message":"model name=qwen failed to load","type":"server_error"}}'; exit 22 ;;
       toobig) printf '%s' '{"error":{"code":400,"message":"the request exceeds the available context size, try increasing it","type":"exceed_context_size_error"}}'; exit 22 ;;
       timeout) echo "curl: (28) Operation timed out after 120000 milliseconds with 0 bytes received" >&2; exit 28 ;;
+      probe)  if [[ -e "$FAKE_PROBE" ]]; then echo "probe present" >> "$FAKE_DIR/calls.log"; else echo "probe absent" >> "$FAKE_DIR/calls.log"; fi
+              echo "curl: (7) Failed to connect to the fake router" >&2; exit 7 ;;
       reply:*) jq -n --rawfile c "${mode#reply:}" '{choices: [{message: {content: ($c | rtrimstr("\n"))}}]}' ;;
       *)      echo "fake curl: unknown POST mode $mode" >&2; exit 99 ;;
     esac
@@ -456,6 +459,143 @@ expect "fact check that times out: the part is left unverified with a WARN and t
   "no WARN, a report exists, or no draft.md" \
   bash -c 'grep -qF "WARN: 03-conclusion verification call failed or ran away" "$1" && [[ ! -e "$2/sections/03-conclusion.verify.json" && -s "$2/draft.md" ]]' _ \
   "$T/out.txt" "$T/outputs/$SLUG"
+
+# --- Phase 94: every --auto exit writes status.json -------------------------
+
+STATUS_KEYS='["exit_code","final","finished_at","missing","reason","slug","stages","stop_reason"]'
+status_file() { echo "$T/outputs/$SLUG/status.json"; }
+# status_has <jq args...>: the status file holds what the filter tests for
+status_has() { jq -e "$@" "$(status_file)" > /dev/null 2>&1; }
+status_text() { if [[ -e "$(status_file)" ]]; then jq -c . "$(status_file)" | head -c 400; else echo "no status.json"; fi; }
+# shape: every key present with its type, the run's own exit code, the menu's
+# nine stages in order, and a UTC timestamp
+shape() {
+  status_has --arg slug "$SLUG" --argjson rc "$RC" --argjson keys "$STATUS_KEYS" '
+    (keys == $keys) and .slug == $slug and .exit_code == $rc
+    and (.finished_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+    and (.stop_reason == null or (.stop_reason | type == "string"))
+    and ([.stages[].id] == ["page","collect","keywords","brief_stages","brief","outline","draft","rewrite","review"])
+    and all(.stages[]; (.state | type == "string") and (.detail | type == "string"))
+    and (.missing | type == "array")
+    and all(.missing[]; (.path == null or (.path | type == "string")) and (.message | type == "string" and length > 0))
+    and (.reason == null or (.reason | type == "string"))
+    and (.final == null or (.final | type == "string"))'
+}
+# status_case <name> <expected rc> <jq filter> [jq args...]: the exit code, the
+# shape, and what this exit must carry
+status_case() {
+  local name=$1 want=$2 filter=$3; shift 3
+  expect "$name: exits $want" "rc $RC" test "$RC" -eq "$want"
+  expect "$name: status.json has the full shape" "$(status_text)" shape
+  expect "$name: status.json carries what this exit means" "$(status_text)" status_has "$@" "$filter"
+}
+
+printf '%s\n' 'Most cats drink about 250 ml of water a day. This guide explains how to choose a fountain.' > "$FIX/intro-250.md"
+jq '.primary_keyword = "orthopedic dog bed"' "$FIX/keywords.json" > "$FIX/bad-keywords.json"
+printf '%s\n' 'foo,bar' '1,2' > "$FIX/no-keyword-column.csv"
+
+tree status-finished
+seed_draft
+cp "$T/outputs/$SLUG/draft.md" "$T/outputs/$SLUG/final.md"
+auto
+status_case "status, finished" 0 \
+  '.stop_reason == null and .final == $f and .missing == [] and .reason == null
+   and ([.stages[] | select(.id != "review") | .state] | all(. == "done"))' --arg f "$T/outputs/$SLUG/final.md"
+
+tree status-preflight
+seed_research
+rm "$T/research/$SLUG/type.txt" "$T/research/$SLUG/suggested.txt"
+auto
+status_case "status, two inputs missing at the preflight" 10 \
+  '.stop_reason == "input" and [.missing[].path] == [$a, $b] and .reason == null and .final == null' \
+  --arg a "$T/research/$SLUG/type.txt" --arg b "$T/research/$SLUG/suggested.txt"
+
+tree status-auto-not-object
+seed_research
+printf '%s\n' '[1]' > "$T/research/$SLUG/auto.json"
+auto
+status_case "status, auto.json not an object" 10 \
+  '.stop_reason == "input" and [.missing[].path] == [$a]' --arg a "$T/research/$SLUG/auto.json"
+
+tree status-word-count
+seed_research
+printf '%s\n' '{"word_count": 50}' > "$T/research/$SLUG/auto.json"
+auto
+status_case "status, word_count out of range" 10 \
+  '.stop_reason == "input" and [.missing[].path] == [$a] and (.missing[0].message | test("word_count"))' \
+  --arg a "$T/research/$SLUG/auto.json"
+
+tree status-bad-export
+seed_research
+rm "$T/research/$SLUG/research.json"
+cp "$FIX/no-keyword-column.csv" "$T/research/$SLUG/inputs/export.csv"
+printf '%s\n' 'https://competitor.example/page' > "$T/research/$SLUG/competitors.txt"
+auto
+status_case "status, an export with no keyword column" 10 \
+  '.stop_reason == "input" and [.missing[].path] == [$a]' --arg a "$T/research/$SLUG/inputs/"
+
+tree status-kept-stale
+seed_brief
+mkdir -p "$T/outputs/$SLUG"
+cp "$FIX/outline.md" "$T/outputs/$SLUG/outline.md"
+touch -d '1 hour ago' "$T/outputs/$SLUG/outline.md"
+auto
+status_case "status, a stale outline kept" 11 \
+  '.stop_reason == "kept" and (.reason | test("Outline")) and .missing == [] and .final == null'
+
+tree status-keyword-rejected
+seed_research
+FAKE_POST="reply:$FIX/bad-keywords.json" auto
+status_case "status, a keyword choice rejected at both seeds" 11 \
+  '.stop_reason == "decision" and (.reason | test("keywords.rejected.json"))'
+
+tree status-numbers
+seed_draft
+cp "$FIX/intro-250.md" "$T/outputs/$SLUG/sections/00-intro.md"
+rm "$T/outputs/$SLUG/draft.md"
+FAKE_POST="reply:$FIX/intro-250.md,reply:$FIX/verify-empty.json,reply:$FIX/intro-250.md,reply:$FIX/verify-empty.json" auto
+expect "status, numbers after two redrafts: the part was redrafted twice" "$(posts) chat calls" test "$(posts)" -eq 4
+status_case "status, numbers after two redrafts" 11 \
+  '.stop_reason == "decision" and (.reason | test("250"))'
+
+tree status-stage-failed
+seed_research
+FAKE_POST=toobig auto
+status_case "status, a stage that failed" 12 \
+  '.stop_reason == "failed" and .missing == [] and .reason == null and .final == null'
+
+tree status-router-preflight
+seed_research
+FAKE_MODELS=down auto
+status_case "status, router down at the preflight" 13 '.stop_reason == "router"'
+FAKE_POST=toobig auto
+status_case "status, the next run replaces the file" 12 '.stop_reason == "failed"'
+expect "status: no temporary file is left beside it" "a status.json.tmp is left" \
+  test ! -e "$(status_file).tmp"
+
+tree status-router-midrun
+seed_research
+FAKE_POST=down auto
+status_case "status, router gone at the keyword call" 13 '.stop_reason == "router"'
+
+tree status-removed-first
+seed_research
+mkdir -p "$T/outputs/$SLUG"
+printf '%s\n' '{"left": "by an earlier run"}' > "$(status_file)"
+FAKE_POST=probe FAKE_PROBE="$(status_file)" auto
+expect "status: the previous file is gone while the run is going" "calls: $(paste -sd' ' "$T/fake/calls.log")" \
+  saw "$T/fake/calls.log" "probe absent"
+status_case "status, after a run that found an old file" 13 '.stop_reason == "router"'
+
+tree status-bad-slug
+env $(env_for) "$ROOT/seo" --auto Not_A_Slug > "$T/out.txt" 2>&1
+RC=$?
+expect "status: an invalid slug exits 2" "rc $RC" test "$RC" -eq 2
+env $(env_for) "$ROOT/seo" --auto > "$T/out.txt" 2>&1
+RC=$?
+expect "status: no slug exits 2" "rc $RC" test "$RC" -eq 2
+expect "status: exit 2 writes no status.json anywhere" "$(find "$T/outputs" -name status.json)" \
+  test -z "$(find "$T/outputs" -name status.json)"
 
 echo
 if (( FAILED )); then

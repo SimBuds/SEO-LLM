@@ -657,6 +657,7 @@ orphan its outline.
 | `outputs/<slug>/rewrite/NN-<heading>.rejected-seedN.md` | `/seo-rewrite` | An edit that failed `check.sh rewrite`, kept for inspection |
 | `outputs/<slug>/final.md` | `/seo-rewrite` | The stitched, edited article |
 | `outputs/<slug>/run.log` | `./seo --auto` | Each unattended run's plan and output, appended |
+| `outputs/<slug>/status.json` | `./seo --auto` | The last unattended run's outcome as JSON, replaced on every run (see Running unattended) |
 | `outputs/<slug>/audit.md` | `/seo-audit` | The verdict on `final.md`, with every FAIL quoted |
 
 `outputs/` and `briefs/_ingest/` are gitignored. The `_`-prefixed prompt files are
@@ -743,6 +744,40 @@ until its input exists. A keyword choice that fails at both seeds is moved to
 `keywords.rejected.json`, so a rerun does not build a brief on it. A draft holding
 numbers the facts do not support gets only the parts holding them redrafted, at
 seeds 4 and 7, before the run stops with 11.
+
+Every run with a valid slug also ends by writing `outputs/<slug>/status.json`, so
+the caller reads the outcome as data instead of parsing the log, which is
+unchanged. The old file is deleted when the run starts, and the new one is written
+beside it and renamed into place, so a reader sees the whole file or none. No file
+after a run means the run was killed or crashed. Exit 2 writes none, because there
+is no valid slug to write under.
+
+```json
+{
+  "slug": "example-page",
+  "exit_code": 10,
+  "stop_reason": "input",
+  "finished_at": "2026-11-01T14:03:07Z",
+  "stages": [{"id": "page", "state": "done", "detail": "new page, nothing live yet"}],
+  "missing": [{"path": "/path/to/SEO-LLM/research/example-page/competitors.txt",
+               "message": "no competitor URL"}],
+  "reason": null,
+  "final": null
+}
+```
+
+| Key | What it holds |
+| --- | --- |
+| `slug`, `exit_code` | The slug, and the same exit code the process returned |
+| `stop_reason` | Why the run stopped: `input` or `blocked` (10), `kept` or `decision` (11), `failed` (12), `router` (13), or `null` when it finished |
+| `finished_at` | When the file was written, in UTC |
+| `stages` | All nine stages in menu order, each with its `state` (`done`, `ready`, `stale` or `blocked`) and `detail`, read from disk as the run ends |
+| `missing` | On 10 only: each input to supply, with its absolute `path` (`null` when a stage is blocked rather than a file missing) and a `message` |
+| `reason` | On 11 only: the decision waiting for a person |
+| `final` | On 0 only: the absolute path to `final.md` |
+
+Every key is always present, and a key that does not apply to the exit is `null` or
+an empty list.
 
 Two decisions never happen unattended: a flagged number is never accepted as a
 fact, and the keyword is never swapped for another term. Both stay with a person,

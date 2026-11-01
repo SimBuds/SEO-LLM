@@ -589,6 +589,7 @@ action_keywords() {
         mv "$dir/keywords.json" "$dir/keywords.rejected.json"
         say "kept for reading at $dir/keywords.rejected.json"
         RUN_STOP="decision"
+        AUTO_REASON="the keyword choice failed its check at both seeds, and choosing another term is for a person: read $dir/keywords.rejected.json"
         return 1
       fi
       seed=2
@@ -692,7 +693,10 @@ action_brief() {
     fi
     err "a whole number between 300 and 6000, or enter to keep $current"
     # The same bad answer would come back from auto.json forever.
-    (( AUTO )) && { RUN_STOP="input"; return 1; }
+    (( AUTO )) && {
+      record_missing "$AUTO_FILE" "word_count is $answer, not a whole number between 300 and 6000"
+      RUN_STOP="input"; return 1
+    }
   done
 }
 
@@ -787,6 +791,7 @@ auto_redo_numbers() {
   say "They are for a person to vouch for (n at the menu) or cut:"
   number_sentences "$out/draft.md" "${unknown[@]}" | sed 's/^/  /'
   RUN_STOP="decision"
+  AUTO_REASON="numbers the facts do not support are still in the draft after two redrafts (${unknown[*]}): a person vouches for them with n at the menu, or cuts them"
   return 1
 }
 
@@ -1062,6 +1067,7 @@ run_all() {
     [[ "$STATE" == "done" ]] && continue
     if [[ "$STATE" == "blocked" ]]; then
       warn "stopped: $label is blocked ($DETAIL)"
+      record_missing "" "$label is blocked ($DETAIL)"
       RUN_STOP="blocked"
       return 1
     fi
@@ -1069,6 +1075,7 @@ run_all() {
       say ""
       warn "stopped at $label, which needs you."
       say "Pick it from the menu when you are ready."
+      record_missing "" "$label needs a person"
       RUN_STOP="input"
       return 0
     fi
@@ -1095,6 +1102,7 @@ run_all() {
         warn "stopped: you kept the stale $label, so the stages after it would be rebuilt from it."
         say "Replace it, or pick a later stage from the menu to rebuild on purpose."
         RUN_STOP="kept"
+        AUTO_REASON="the stale $label was kept because rebuild is false, so the stages after it were not rebuilt from it"
         return 0
       fi
     fi
@@ -1249,6 +1257,46 @@ AUTO_DECISION=11        # a decision only a person should make
 AUTO_STAGE_FAILED=12    # a stage did not finish: a check still failing, or a call that errored
 AUTO_ROUTER=13          # the router is not serving qwen, at the start or during the run
 
+# What status.json carries beyond the exit code: the inputs to supply on a 10,
+# one "path<TAB>message" each with an empty path when the stop names a stage
+# rather than a file, and the decision waiting for a person on an 11.
+AUTO_MISSING=()
+AUTO_REASON=""
+
+record_missing() { AUTO_MISSING+=("$1"$'\t'"$2"); } # record_missing <path> <message>
+
+# auto_missing <path> <message> [line]: report a missing input the way the log
+# always has, "missing input: <path>: <message>", or as the line given where the
+# old wording does not start with the path, and record it for status.json.
+auto_missing() {
+  err "missing input: ${3:-$1: $2}"
+  record_missing "$1" "$2"
+  RUN_STOP="input"
+}
+
+# write_status <exit-code>: outputs/<slug>/status.json for the caller, written
+# beside itself and renamed into place, so a reader never sees half a file.
+write_status() {
+  local rc=$1 f="$OUTPUTS/$SLUG/status.json" id
+  local -a stages=()
+  for id in "${STAGE_IDS[@]}"; do
+    stage_status "$id"
+    stages+=("$id"$'\t'"$STATE"$'\t'"$DETAIL")
+  done
+  jq -n --arg slug "$SLUG" --argjson code "$rc" --arg stop "$RUN_STOP" \
+        --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg reason "$AUTO_REASON" \
+        --arg final "$OUTPUTS/$SLUG/final.md" \
+        --rawfile stages <(printf '%s\n' "${stages[@]}") \
+        --rawfile missing <(printf '%s\n' "${AUTO_MISSING[@]}") '
+    def rows: split("\n") | map(select(length > 0) | split("\t"));
+    def text: if . == "" then null else . end;
+    {slug: $slug, exit_code: $code, stop_reason: ($stop | text), finished_at: $at,
+     stages: [$stages | rows[] | {id: .[0], state: .[1], detail: (.[2] // "")}],
+     missing: (if $code == 10 then [$missing | rows[] | {path: (.[0] | text), message: .[1]}] else [] end),
+     reason: (if $code == 11 then ($reason | text) else null end),
+     final: (if $code == 0 then $final else null end)}' > "$f.tmp" && mv "$f.tmp" "$f"
+}
+
 auto_value() { # auto_value <key>: the auto.json value as text, empty when unset
   { [[ -r "$AUTO_FILE" ]] && jq -r --arg k "$1" '.[$k] // empty | tostring' "$AUTO_FILE"; } || true
 }
@@ -1258,41 +1306,38 @@ auto_value() { # auto_value <key>: the auto.json value as text, empty when unset
 # one would otherwise be read from a closed stdin and recorded as an empty answer:
 # a general article, or a page with no facts, that nobody chose.
 auto_preflight() {
-  local dir="$RESEARCH/$SLUG" t="" live kw bs n_inputs n_urls=0
-  local -a missing=()
+  local dir="$RESEARCH/$SLUG" t="" live kw bs n_inputs n_urls=0 before=${#AUTO_MISSING[@]}
   live=$(auto_value live_url)
-  [[ -z "$live" || "$live" =~ ^https?:// ]] || missing+=("live_url in $AUTO_FILE is not an http(s) URL: $live")
+  [[ -z "$live" || "$live" =~ ^https?:// ]] \
+    || auto_missing "$AUTO_FILE" "live_url is not an http(s) URL: $live" "live_url in $AUTO_FILE is not an http(s) URL: $live"
   if [[ ! -r "$dir/research.json" ]]; then
     n_inputs=$(find "$dir/inputs" -maxdepth 1 -type f \( -name '*.csv' -o -name '*.tsv' -o -name '*.txt' \) 2>/dev/null | wc -l)
     [[ -r "$dir/competitors.txt" ]] && n_urls=$(grep -cve '^[[:space:]]*$' -e '^[[:space:]]*#' "$dir/competitors.txt")
-    (( n_inputs > 0 )) || missing+=("$dir/inputs/: no keyword export")
-    (( n_urls > 0 )) || missing+=("$dir/competitors.txt: no competitor URL")
+    (( n_inputs > 0 )) || auto_missing "$dir/inputs/" "no keyword export"
+    (( n_urls > 0 )) || auto_missing "$dir/competitors.txt" "no competitor URL"
   fi
   stage_status keywords; kw="$STATE"
   stage_status brief_stages; bs="$STATE"
   if [[ "$kw" != done || "$bs" != done ]]; then
-    [[ -s "$(purpose_file)" ]] || missing+=("$(purpose_file): the page purpose, in one line")
+    [[ -s "$(purpose_file)" ]] || auto_missing "$(purpose_file)" "the page purpose, in one line"
     if [[ -r "$(type_file)" ]]; then
       t=$(tr -d '[:space:]' < "$(type_file)")
       [[ -z "$t" || -r "$ROOT/prompts/brief-type-$t.md" ]] \
-        || missing+=("$(type_file): unknown content type $t (review, roundup, guide, how-to, or empty)")
+        || auto_missing "$(type_file)" "unknown content type $t (review, roundup, guide, how-to, or empty)"
     else
-      missing+=("$(type_file): the content type (review, roundup, guide, how-to, or empty for a general article)")
+      auto_missing "$(type_file)" "the content type (review, roundup, guide, how-to, or empty for a general article)"
     fi
   fi
   [[ "$kw" != done && ! -r "$(suggested_file)" ]] \
-    && missing+=("$(suggested_file): keywords to consider, one per line, empty for none")
+    && auto_missing "$(suggested_file)" "keywords to consider, one per line, empty for none"
   if [[ "$bs" != done ]]; then
     if [[ ! -e "$(facts_file)" ]]; then
-      missing+=("$(facts_file): what the page may state as fact, one per line, empty for none")
+      auto_missing "$(facts_file)" "what the page may state as fact, one per line, empty for none"
     elif [[ "$t" == review || "$t" == roundup ]] && ! grep -q '[^[:space:]]' "$(facts_file)"; then
-      missing+=("$(facts_file): a $t names products, so it needs them as facts")
+      auto_missing "$(facts_file)" "a $t names products, so it needs them as facts"
     fi
   fi
-  (( ${#missing[@]} == 0 )) && return 0
-  local m
-  for m in "${missing[@]}"; do err "missing input: $m"; done
-  return 1
+  (( ${#AUTO_MISSING[@]} == before ))
 }
 
 # The page check and the collection ask questions at every turn in the menu, so
@@ -1307,12 +1352,12 @@ auto_page() {
   if [[ -n "$live" ]]; then
     say "auto: the page is live at $live"
     bash "$ROOT/scripts/fetch_page.sh" "$live" "$dir/page.json" || {
-      err "missing input: the live page could not be fetched: $live"
+      auto_missing "$AUTO_FILE" "live_url could not be fetched: $live" "the live page could not be fetched: $live"
       return $AUTO_MISSING_INPUT
     }
   else
     say "auto: no live_url in $AUTO_FILE, so this is a new page"
-    bash "$ROOT/scripts/fetch_page.sh" --absent "$dir/page.json" || return $AUTO_STAGE_FAILED
+    bash "$ROOT/scripts/fetch_page.sh" --absent "$dir/page.json" || { RUN_STOP="failed"; return $AUTO_STAGE_FAILED; }
   fi
 }
 
@@ -1324,15 +1369,30 @@ auto_collect() {
   bash "$ROOT/scripts/research_collect.sh" "$SLUG"
   rc=$?
   # 3 and 4 are an export with no keyword column or one that cannot be parsed.
-  (( rc == 3 || rc == 4 )) && { err "missing input: an export could not be read, see above"; return $AUTO_MISSING_INPUT; }
-  (( rc == 0 )) || return $AUTO_STAGE_FAILED
-  run_check research "$dir/research.json" || return $AUTO_STAGE_FAILED
+  (( rc == 3 || rc == 4 )) && {
+    auto_missing "$dir/inputs/" "an export could not be read, see the log" "an export could not be read, see above"
+    return $AUTO_MISSING_INPUT
+  }
+  (( rc == 0 )) || { RUN_STOP="failed"; return $AUTO_STAGE_FAILED; }
+  run_check research "$dir/research.json" || { RUN_STOP="failed"; return $AUTO_STAGE_FAILED; }
 }
 
+# The caller reads status.json rather than the log: the exit code, why the run
+# stopped, each stage's state, and on a 10 or an 11 what to supply or decide.
+# Every return of auto_run passes through here. The previous file goes first, so
+# a run killed part way leaves none rather than the last run's.
 auto_main() {
+  rm -f "$OUTPUTS/$SLUG/status.json"
+  auto_run
+  local rc=$?
+  write_status "$rc"
+  return "$rc"
+}
+
+auto_run() {
   say "seo --auto $SLUG, $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   if [[ -e "$AUTO_FILE" ]] && ! jq -e 'type == "object"' "$AUTO_FILE" > /dev/null 2>&1; then
-    err "missing input: $AUTO_FILE is not a JSON object"
+    auto_missing "$AUTO_FILE" "not a JSON object" "$AUTO_FILE is not a JSON object"
     return $AUTO_MISSING_INPUT
   fi
   # Checked before anything runs: found at the merge, the brief would already be
@@ -1340,7 +1400,8 @@ auto_main() {
   local wc
   wc=$(auto_value word_count)
   if [[ -n "$wc" ]] && ! valid_word_count "$wc"; then
-    err "missing input: word_count in $AUTO_FILE is $wc, not a whole number between 300 and 6000"
+    auto_missing "$AUTO_FILE" "word_count is $wc, not a whole number between 300 and 6000" \
+      "word_count in $AUTO_FILE is $wc, not a whole number between 300 and 6000"
     return $AUTO_MISSING_INPUT
   fi
   auto_preflight || return $AUTO_MISSING_INPUT
