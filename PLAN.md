@@ -174,8 +174,9 @@ Context is not a per-stage knob. Each router preset fixes it per model (65536 fo
 ### Failure handling
 
 - If a per-section check fails, `scripts/draft_sections.sh` retries once with seed 2, then writes `sections/NN-<heading>.ERROR.md` and stops. An HTTP error or empty reply stops it at once. Re-running skips sections that already exist and pass.
-- A fact-check call that fails or times out leaves the part unverified with a WARN. Re-running retries it.
+- A fact-check call that fails for any other reason, or times out, leaves the part unverified with a WARN. Re-running retries it.
 - If a rewrite fails its check twice, `scripts/rewrite_sections.sh` keeps the drafted part with a WARN and carries on, because the rewrite is polish and never blocks the article.
+- A router that cannot serve the model (`scripts/llm_call.sh` exit 7, unreachable, or 75, the model failed to load) stops whichever stage made the call, with that code. The brief stages do not try the next seed, the rewrite does not keep the drafted text, and the fact check does not leave the part unverified and carry on, because each of those would be stitched into the article and no unattended rerun comes back to it. `./seo --auto` exits 13, and a rerun once the router is back resumes where the stage stopped (Phases 92 and 93, 2026-11-01).
 
 ---
 

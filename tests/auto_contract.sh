@@ -19,6 +19,9 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 SLUG=contract-page
+# brief_stages.sh reads prompts/ relative to the working directory, as it does
+# when ./seo runs from the repo root, so the suite runs from there too.
+cd "$ROOT" || exit 2
 
 for tool in jq script timeout; do
   command -v "$tool" > /dev/null || { echo "missing tool: $tool" >&2; exit 2; }
@@ -27,8 +30,8 @@ done
 # --- the fake router -------------------------------------------------------
 # FAKE_POST and FAKE_MODELS are comma lists, one entry per call in order, the
 # last entry repeating. A POST entry is down (curl 7), noload (HTTP 500, the
-# model failed to load), toobig (HTTP 400, prompt over the context) or
-# reply:<file> (the file's text as the model's reply). A /models entry is ok,
+# model failed to load), toobig (HTTP 400, prompt over the context), timeout
+# (curl 28) or reply:<file> (the file's text as the model's reply). A /models entry is ok,
 # down, or noqwen (a router up but serving only gemma). Counters live in
 # FAKE_DIR so each run starts from call 1.
 mkdir -p "$WORK/bin"
@@ -61,6 +64,7 @@ case "$url" in
       down)   echo "curl: (7) Failed to connect to the fake router" >&2; exit 7 ;;
       noload) printf '%s' '{"error":{"code":500,"message":"model name=qwen failed to load","type":"server_error"}}'; exit 22 ;;
       toobig) printf '%s' '{"error":{"code":400,"message":"the request exceeds the available context size, try increasing it","type":"exceed_context_size_error"}}'; exit 22 ;;
+      timeout) echo "curl: (28) Operation timed out after 120000 milliseconds with 0 bytes received" >&2; exit 28 ;;
       reply:*) jq -n --rawfile c "${mode#reply:}" '{choices: [{message: {content: ($c | rtrimstr("\n"))}}]}' ;;
       *)      echo "fake curl: unknown POST mode $mode" >&2; exit 99 ;;
     esac
@@ -338,6 +342,120 @@ FAKE_POST=down menu '3\n\nq\n'
 expect "menu: a router failure at a picked stage reports the call and returns to the menu" \
   "rc $RC, or the failed call or the second menu is missing" \
   bash -c '[[ $2 -eq 0 ]] && grep -qF "the call failed" "$1" && (( $(grep -c "Choose: " "$1") >= 2 ))' _ "$T/menu.txt" "$RC"
+
+# --- Phase 93: the stage scripts pass the router code up ------------------
+# The brief stages turned it into exit 3, the rewrite into a kept draft, and the
+# fact check into a WARN. Where the call under test is the fact check, it is the
+# last call of the run: any later call would fail too and hide whether the fact
+# check passed the code up.
+
+mkdir -p "$FIX/parts"
+printf '%s\n' 'A fountain keeps water moving, which many cats prefer. This guide explains how to choose one.' \
+  > "$FIX/parts/00-intro.md"
+printf '%s\n' '## How a Fountain Works' '' 'A small pump circulates the water through a filter.' \
+  > "$FIX/parts/01-how-a-fountain-works.md"
+printf '%s\n' '## FAQ' '' '### How often should a fountain be cleaned?' '' 'Clean it on a regular schedule.' \
+  > "$FIX/parts/02-faq.md"
+printf '%s\n' '## Conclusion' '' 'A fountain is a simple upgrade. Visit a local jeweler for a private consultation.' \
+  > "$FIX/parts/03-conclusion.md"
+printf '%s\n' '{"issues": []}' > "$FIX/verify-empty.json"
+printf '%s\n' '# A heading no part may gain' '' 'Some words.' > "$FIX/bad-edit.md"
+printf '%s\n' 'this is not json' > "$FIX/notjson.txt"
+PARTS=(00-intro 01-how-a-fountain-works 02-faq 03-conclusion)
+
+# seed_draft: the brief carries one fact, so every part gets a fact check, and
+# four drafted parts with their checks and draft.md are in place, so the rewrite
+# runs next. Each artifact is older than the ones built from it.
+seed_draft() {
+  seed_brief
+  jq '.facts = ["The shop sells ceramic fountains."]' "$ROOT/briefs/example.json" > "$T/briefs/$SLUG.json"
+  local o="$T/outputs/$SLUG" p
+  mkdir -p "$o/sections"
+  cp "$FIX/outline.md" "$o/outline.md"
+  for p in "${PARTS[@]}"; do
+    cp "$FIX/parts/$p.md" "$o/sections/$p.md"
+    cp "$FIX/verify-empty.json" "$o/sections/$p.verify.json"
+    [[ "$p" == 00-intro ]] || head -1 "$FIX/parts/$p.md" > "$o/sections/$p.block.md"
+  done
+  for p in "${PARTS[@]}"; do cat "$o/sections/$p.md"; echo; done > "$o/draft.md"
+  touch -d '3 hours ago' "$T/briefs/$SLUG.json"
+  touch -d '2 hours ago' "$o/outline.md"
+  touch -d '1 hour ago' "$o/sections"/* "$o/draft.md"
+}
+posts() { grep -c '^post' "$T/fake/calls.log" 2>/dev/null || echo 0; }
+
+tree auto-brief-down
+seed_research
+cp "$FIX/keywords.json" "$T/research/$SLUG/keywords.json"
+FAKE_POST=down auto
+expect "brief stage call that cannot connect: one call, no second seed" "$(posts) chat calls" test "$(posts)" -eq 1
+# The schema sidecar is written before the call, so the stage file itself is what counts.
+expect "brief stage call that cannot connect: no stage file" "01-intent.json was written" \
+  test ! -e "$T/research/$SLUG/brief-stages/01-intent.json"
+expect "--auto: brief stage call that cannot connect exits 13" "rc $RC" test "$RC" -eq 13
+
+tree auto-brief-unusable
+seed_research
+cp "$FIX/keywords.json" "$T/research/$SLUG/keywords.json"
+FAKE_POST="reply:$FIX/notjson.txt" auto
+expect "brief stage reply unusable twice: both seeds tried" "$(posts) chat calls" test "$(posts)" -eq 2
+expect "--auto: brief stage reply unusable twice still exits 12" "rc $RC" test "$RC" -eq 12
+
+tree auto-rewrite-down
+seed_draft
+FAKE_POST=down auto
+expect "rewrite call that cannot connect: one call, no second seed" "$(posts) chat calls" test "$(posts)" -eq 1
+expect "rewrite call that cannot connect: no final.md" "final.md was stitched" test ! -e "$T/outputs/$SLUG/final.md"
+expect "rewrite call that cannot connect: no kept copy of the drafted part" "rewrite/00-intro.md exists" \
+  test ! -e "$T/outputs/$SLUG/rewrite/00-intro.md"
+expect "--auto: rewrite call that cannot connect exits 13" "rc $RC" test "$RC" -eq 13
+
+tree auto-rewrite-rejected
+seed_draft
+FAKE_POST="reply:$FIX/bad-edit.md" auto
+expect "rewrite failing its check twice: the drafted text is kept with a WARN" \
+  "no WARN, or rewrite/00-intro.md is not the drafted part" \
+  bash -c 'grep -qF "WARN: 00-intro kept its unedited text" "$1" && cmp -s "$2" "$3"' _ \
+  "$T/out.txt" "$T/outputs/$SLUG/sections/00-intro.md" "$T/outputs/$SLUG/rewrite/00-intro.md"
+expect "rewrite failing its check twice: final.md is still stitched" "no final.md" test -s "$T/outputs/$SLUG/final.md"
+
+tree auto-rewrite-verify-down
+seed_draft
+mkdir -p "$T/outputs/$SLUG/rewrite"
+for p in 00-intro 01-how-a-fountain-works 02-faq; do
+  cp "$FIX/parts/$p.md" "$T/outputs/$SLUG/rewrite/$p.md"
+  cp "$FIX/verify-empty.json" "$T/outputs/$SLUG/rewrite/$p.verify.json"
+done
+FAKE_POST="reply:$FIX/parts/03-conclusion.md,down" auto
+expect "fact check of the last edit: the edit was accepted, then checked" "$(posts) chat calls" test "$(posts)" -eq 2
+expect "fact check that cannot connect during the rewrite: no final.md" "final.md was stitched" \
+  test ! -e "$T/outputs/$SLUG/final.md"
+expect "--auto: fact check that cannot connect during the rewrite exits 13" "rc $RC" test "$RC" -eq 13
+
+tree auto-draft-verify-down
+seed_draft
+rm "$T/outputs/$SLUG/sections/03-conclusion.md" "$T/outputs/$SLUG/sections/03-conclusion.verify.json" "$T/outputs/$SLUG/draft.md"
+FAKE_POST="reply:$FIX/parts/03-conclusion.md,down" auto
+expect "fact check of the last drafted part: the part was drafted, then checked" "$(posts) chat calls" test "$(posts)" -eq 2
+expect "fact check that cannot connect during the draft: draft.md is not stitched" "draft.md was stitched" \
+  test ! -e "$T/outputs/$SLUG/draft.md"
+expect "fact check that cannot connect during the draft: the part is kept, unverified" \
+  "the part is missing or has a report" \
+  bash -c '[[ -s "$1.md" && ! -e "$1.verify.json" ]]' _ "$T/outputs/$SLUG/sections/03-conclusion"
+expect "--auto: fact check that cannot connect during the draft exits 13" "rc $RC" test "$RC" -eq 13
+FAKE_POST="reply:$FIX/verify-empty.json,down" auto
+expect "the rerun once the router is back verifies that part and stitches the draft" \
+  "no report for the part, or no draft.md, rc $RC" \
+  bash -c '[[ -s "$1/sections/03-conclusion.verify.json" && -s "$1/draft.md" ]]' _ "$T/outputs/$SLUG"
+
+tree auto-draft-verify-timeout
+seed_draft
+rm "$T/outputs/$SLUG/sections/03-conclusion.md" "$T/outputs/$SLUG/sections/03-conclusion.verify.json" "$T/outputs/$SLUG/draft.md"
+FAKE_POST="reply:$FIX/parts/03-conclusion.md,timeout,down" auto
+expect "fact check that times out: the part is left unverified with a WARN and the draft is stitched" \
+  "no WARN, a report exists, or no draft.md" \
+  bash -c 'grep -qF "WARN: 03-conclusion verification call failed or ran away" "$1" && [[ ! -e "$2/sections/03-conclusion.verify.json" && -s "$2/draft.md" ]]' _ \
+  "$T/out.txt" "$T/outputs/$SLUG"
 
 echo
 if (( FAILED )); then

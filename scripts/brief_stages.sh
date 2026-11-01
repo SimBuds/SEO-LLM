@@ -16,11 +16,15 @@
 # Env: RESEARCH_DIR (default research), BRIEFS_DIR (default briefs),
 #      STAGE_MODEL (default the wrapper's qwen).
 #
-# Exit codes: 1 usage, 2 missing input, 3 the model's reply was unusable twice.
+# Exit codes: 1 usage, 2 missing input, 3 the model's reply was unusable twice,
+# 7 or 75 the router could not serve the model (llm_call.sh's code, passed up).
 
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# For router_down, which tells a router outage from an unusable reply.
+# shellcheck source=lib_parts.sh
+source "$HERE/lib_parts.sh"
 ROOT="${RESEARCH_DIR:-research}"
 TEMP=0.3
 
@@ -192,10 +196,17 @@ run_stage() { # run_stage <index> <stage>
   # lands exactly on its cap was cut mid-word. A cut reply is as unusable as an
   # unparseable one and goes to the next seed: a non-fatal check here let a cut
   # target_audience reach the merged brief and pass check.sh brief (2026-09-22).
-  local candidate="${out%.json}.reply.tmp"
+  local candidate="${out%.json}.reply.tmp" rc
   for seed in 1 2; do
-    if reply=$(LLM_MODEL="${STAGE_MODEL:-qwen}" bash "$HERE/llm_call.sh" "$prompt" "$TEMP" "$seed" "$schema") \
-       && jq -e . <<< "$reply" > /dev/null 2>&1; then
+    rc=0
+    reply=$(LLM_MODEL="${STAGE_MODEL:-qwen}" bash "$HERE/llm_call.sh" "$prompt" "$TEMP" "$seed" "$schema") || rc=$?
+    # A router that cannot serve the model fails every seed the same way, and
+    # the caller needs its code to tell an outage from an unusable reply.
+    if router_down "$rc"; then
+      echo "stage $stage: the router could not serve the model, so the stage stops without another seed" >&2
+      exit "$rc"
+    fi
+    if (( rc == 0 )) && jq -e . <<< "$reply" > /dev/null 2>&1; then
       printf '%s\n' "$reply" | jq . > "$candidate"
       if ! bash "$HERE/check.sh" truncated "$candidate" "$schema"; then
         rm -f "$candidate"

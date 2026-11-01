@@ -109,7 +109,8 @@ clean_outline() {
 # literal string swaps; the report is kept as <dir>/<name>.verify.json and the
 # text before verification as <dir>/<name>.unverified.md. If the verified part
 # fails the check command, the unverified text is restored. Does nothing when
-# the report already exists.
+# the report already exists. Returns 7 or 75 when the router could not serve the
+# call, and 0 otherwise, a failed or runaway call included.
 verify_part() {
   local name=$1 out=$2 dir=$3 headsrc=$4; shift 4
   local report="$dir/$name.verify.json" prompt="$dir/$name.verify.prompt.txt"
@@ -123,10 +124,20 @@ verify_part() {
   suspects=$(grep -v '^#' "$orig" | grep -oiE "$ABSOLUTE_SENTENCE" | sed 's/^ */- /' || true)
   bash "$ROOT/scripts/fill_prompt.sh" "$ROOT/prompts/verify.md" --brief "$BRIEF" \
     --set-file "SECTION_TEXT=$orig" --set "SUSPECTS=${suspects:-(none)}" > "$prompt"
-  if ! LLM_MODEL="$VERIFY_MODEL" LLM_MAX_TOKENS=1500 LLM_TIMEOUT=120 \
-      bash "$ROOT/scripts/llm_call.sh" "$prompt" 0.1 1 \
-      "$ROOT/prompts/verify.schema.json" > "$report.tmp"; then
+  local rc=0
+  LLM_MODEL="$VERIFY_MODEL" LLM_MAX_TOKENS=1500 LLM_TIMEOUT=120 \
+    bash "$ROOT/scripts/llm_call.sh" "$prompt" 0.1 1 \
+    "$ROOT/prompts/verify.schema.json" > "$report.tmp" || rc=$?
+  if (( rc )); then
     rm -f "$report.tmp" "$orig"
+    # A call that ran away leaves the part unverified and the stage goes on. A
+    # router that cannot serve the model stops the stage instead, with its code:
+    # once draft.md or final.md is stitched, no unattended rerun comes back to
+    # verify this part, so carrying on would ship it unchecked.
+    if router_down "$rc"; then
+      echo "$name: the router could not serve the fact check, so the stage stops here" >&2
+      return "$rc"
+    fi
     echo "WARN: $name verification call failed or ran away; part left unverified (rerun to retry)" >&2
     return 0
   fi

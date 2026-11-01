@@ -133,6 +133,7 @@ Editing a stage file is usually better than rerunning it, because a rerun is a f
    - It also can't add new words, and a fix to an overstated sentence can't drop more than half of it.
    - Findings are logged in `sections/NN-<heading>.verify.json`, and the text before the pass is kept in `.unverified.md`. If the fixed part fails its check, that text is restored.
    - A fact-check call that fails or times out leaves the part unverified with a warning. Rerunning retries it.
+   - A router that can't serve the model stops the draft instead, so `draft.md` is never stitched with an unchecked part.
 7. **Output:** the parts are joined into `draft.md`. Rerunning skips parts that already passed. A strictly newer outline or `--fresh` redoes everything, and `DRAFT_SEED` moves the seed pair the loop tries. From the menu, `p` redoes one part at a seed you choose and leaves the rest alone.
 8. **`check.sh draft … draft`:**
    - **Fails** if the headings don't match the outline or outline notes are left in.
@@ -150,7 +151,7 @@ Editing a stage file is usually better than rerunning it, because a rerun is a f
    - no numbers that aren't in the input or the facts
    - no more absolute wording than before
    - the call to action neither lost nor added to another part
-4. **Failures:** a failed edit is retried with seed 2, and rejected edits are kept as `rejected-seedN.md`. After a second failure the draft text is kept with a warning, so the run never stops.
+4. **Failures:** a failed edit is retried with seed 2, and rejected edits are kept as `rejected-seedN.md`. After a second failure the draft text is kept with a warning, so a failed edit never stops the run. A router that can't serve the model does stop it, and nothing is stitched, because kept text would never be edited on a rerun.
 5. **Second fact-check:** each accepted edit goes through the same fact-check pass again (`rewrite/NN-<heading>.verify.json`).
 6. **Output:** the parts are joined into `final.md`, and `check.sh draft` runs against the real target. Rerunning skips edits that are newer than their input and still pass. `--fresh` redoes every part.
 7. **Final review:** Claude Code compares `final.md` with `draft.md` and the facts. It notes which rejected issues were fixed and any claim the facts don't support.

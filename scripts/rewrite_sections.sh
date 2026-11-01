@@ -10,7 +10,9 @@
 # Each edit is checked with `check.sh rewrite` against its input (same
 # headings, similar length, no new numbers, no new absolute wording, CTA kept)
 # and retried once with seed 2. A part that fails twice keeps its unedited
-# text, with a WARN; the rewrite is polish, so it never stops the run.
+# text, with a WARN; the rewrite is polish, so a failed edit never stops the run.
+# A router that cannot serve the model does: the script exits with llm_call.sh's
+# 7 or 75 and stitches nothing.
 # Env: OUTPUTS_DIR (default outputs) relocates the output tree.
 # Every edited part then gets the same fact-verification call as the draft
 # (verify_part in lib_parts.sh), because an edit can reintroduce or reword a
@@ -66,8 +68,19 @@ for name in "${PARTS[@]}"; do
       --set "PROBLEMS=$problems" > "$prompt"
     ok=0
     for seed in 1 2; do
-      if ! LLM_MODEL="$MODEL" LLM_MAX_TOKENS=2500 LLM_TIMEOUT=180 \
-          bash "$ROOT/scripts/llm_call.sh" "$prompt" "$TEMPERATURE" "$seed" > "$out"; then
+      rc=0
+      LLM_MODEL="$MODEL" LLM_MAX_TOKENS=2500 LLM_TIMEOUT=180 \
+        bash "$ROOT/scripts/llm_call.sh" "$prompt" "$TEMPERATURE" "$seed" > "$out" || rc=$?
+      # A failed edit keeps the drafted text, because the rewrite is polish. A
+      # router that cannot serve the model is not a failed edit: the kept text
+      # would be stitched into final.md and skipped by every rerun, so the
+      # article would ship unedited. The stage stops and passes the code up.
+      if router_down "$rc"; then
+        rm -f "$out"
+        echo "$name: the router could not serve the model, so the rewrite stops here" >&2
+        exit "$rc"
+      fi
+      if (( rc )); then
         echo "WARN: $name rewrite call failed (seed $seed)" >&2; continue
       fi
       restore_headings "$in" "$out"
