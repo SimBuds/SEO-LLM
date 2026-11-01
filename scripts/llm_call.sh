@@ -5,12 +5,16 @@
 # carry no built-in system prompt, so a call without one gets the bare model.
 # With a schema file, the router constrains the reply to that JSON schema.
 # Reads the router's served context size first and refuses to call below MIN_CTX.
-# Prints the reply to stdout. Exits non-zero on HTTP error or an empty reply.
+# Prints the reply to stdout. Exits non-zero on HTTP error or an empty reply,
+# with 75 (ROUTER_LOAD_FAILED in lib_parts.sh) when the router failed to load the model.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SYSTEM_FILE="$ROOT/prompts/system.md"
+# For ROUTER_LOAD_FAILED, the exit code every caller reads as "router down".
+# shellcheck source=lib_parts.sh
+source "$ROOT/scripts/lib_parts.sh"
 
 PROMPT_FILE="${1:?prompt file required}"
 TEMPERATURE="${2:-0.7}"
@@ -100,8 +104,16 @@ PAYLOAD=$(jq -n \
 
 # On HTTP error, --fail-with-body leaves the server's explanation in RESPONSE.
 # Print it before exiting, or set -e drops it and only the status code shows.
+# A model the router could not start is the router's state, not this request's,
+# and only this script sees the body that says so, so it gets its own code here
+# rather than a stderr grep in every caller.
 RESPONSE=$(curl -sS --fail-with-body ${TIMEOUT:+--max-time "$TIMEOUT"} -X POST "$HOST/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  --data-binary @- <<< "$PAYLOAD") || { rc=$?; echo "$RESPONSE" >&2; exit "$rc"; }
+  --data-binary @- <<< "$PAYLOAD") || {
+  rc=$?
+  echo "$RESPONSE" >&2
+  (( rc == 22 )) && [[ "$RESPONSE" == *"failed to load"* ]] && exit "$ROUTER_LOAD_FAILED"
+  exit "$rc"
+}
 
 echo "$RESPONSE" | jq -er '.choices[0].message.content'

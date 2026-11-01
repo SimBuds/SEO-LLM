@@ -1,7 +1,17 @@
 #!/usr/bin/env bash
-# Shared helpers for draft_sections.sh, rewrite_sections.sh, and check.sh.
-# Source it; it defines functions and constants only.
+# Shared helpers for seo.sh, llm_call.sh, draft_sections.sh, rewrite_sections.sh,
+# and check.sh. Source it; it defines functions and constants only.
 # verify_part expects ROOT, BRIEF, and VERIFY_MODEL to be set by the caller.
+
+# The llm_call.sh exit codes that mean the router could not serve the model at
+# all, rather than that this one request failed: 7 is curl's "could not
+# connect", 75 is the wrapper's own for a model the router failed to load, which
+# is almost always another process holding the GPU (curl has not used 75 since
+# 7.82). Both pass up through a stage unchanged, so ./seo --auto exits 13 and its
+# caller retries later instead of reading the log.
+ROUTER_UNREACHABLE=7
+ROUTER_LOAD_FAILED=75
+router_down() { (( $1 == ROUTER_UNREACHABLE || $1 == ROUTER_LOAD_FAILED )); }
 
 # Sentences with absolute wording, used by the verifier hints and the checks.
 # A sentence starts at a line start or after whitespace, never mid-word, and a

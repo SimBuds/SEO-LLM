@@ -504,6 +504,7 @@ Posts a non-streaming request to `/v1/chat/completions` and prints `.choices[0].
 - Before each call it reads `GET /models` and requires the served context to be at least `MIN_CTX` (32768, the constant at the top of the script). Below that it exits 3 without calling the model. A loaded model reports `meta.n_ctx`, an unloaded one carries `--ctx-size` in `status.args`, so the check works in both states and never forces a model load.
 - If the context cannot be read at all (`/models` unreachable, the model absent from the list, or neither field present), it exits non-zero rather than calling on an unverified context. A router that changes the shape of `/models` therefore stops calls until the script is updated, which is deliberate.
 - Exits non-zero on an HTTP error, printing the server's error body to stderr, and on an empty reply.
+- A router that cannot serve the model at all exits with a code of its own: 7 when it cannot be reached (curl's code), and 75 when it answers that the model failed to load. Both are named in `scripts/lib_parts.sh` (`router_down`), and a stage passes either up unchanged, which is how `./seo --auto` tells a router outage from a stage that failed.
 
 ## Brief schema
 
@@ -730,8 +731,8 @@ The exit code is the contract:
 | 0 | `final.md` is written and passes its check | Run the audit |
 | 10 | An input is missing or invalid, each one named | Supply it and run again |
 | 11 | A decision for a person: numbers the facts do not support after two redrafts, a keyword choice failing at both seeds, or a stale artifact with `rebuild` false | Hand the page to a person |
-| 12 | A stage did not finish: a check still failing at the seed limit, or a call that errored | Read the log |
-| 13 | The router is not serving `qwen` | Fix the router, then run again |
+| 12 | A stage did not finish: a check still failing at the seed limit, or a call that errored for a reason other than the router (an oversized prompt, a timeout) | Read the log |
+| 13 | The router is not serving `qwen`: down or without `qwen` when the run starts, or unreachable, without `qwen`, or unable to load the model during it | Run again later, and fix the router if it persists |
 | 2 | No slug, or not a valid one | Fix the call |
 
 Every input is checked before anything is fetched or a model is called, so a 10
@@ -782,7 +783,8 @@ which one. None of them are retried silently.
 | 3 | The router serves less context than `MIN_CTX` | The preset was deployed smaller than 32768. Fix the preset in `~/Apps/Local-LLM`, or lower `MIN_CTX` if that is genuinely what you want |
 | 5 | `/models` has no entry for the model, or no context size in it | Confirm the router serves `qwen` with the quickstart check. A `/models` response shape change also lands here |
 | 7 | The router is unreachable | `systemctl --user is-active llama-server`, then check `LLM_HOST` |
-| 22 | The router returned an HTTP error | The body is printed. An oversized prompt reads `exceeds the available context size`, which means the input must shrink, not that the call should be retried. A body reading `model name=qwen failed to load` is a router-side problem, see below |
+| 22 | The router returned an HTTP error | The body is printed. An oversized prompt reads `exceeds the available context size`, which means the input must shrink, not that the call should be retried. A body reading `model name=qwen failed to load` exits 75 instead |
+| 75 | The router could not load the model (HTTP 500, `model name=qwen failed to load`) | Almost always another process holding the GPU, see below. `./seo --auto` exits 13 for it |
 
 Other things worth knowing:
 

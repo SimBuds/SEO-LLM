@@ -337,10 +337,16 @@ need_router() {
   if [[ " $served " != *" qwen "* ]]; then
     err "the router at $LLM_HOST is not serving qwen, so this stage cannot run."
     say "Check it with: systemctl --user is-active llama-server"
+    RUN_STOP="router"
     return 1
   fi
   return 0
 }
+
+# note_router <rc>: a stage whose model call found no router to serve it stops
+# the run for the router, not for the stage, so auto mode exits 13 and its caller
+# retries later. Called first in a failure branch, while $? is still the call's.
+note_router() { router_down "$1" && RUN_STOP="router"; return 0; }
 
 purpose_file() { printf '%s/%s/brief-stages/purpose.txt' "$RESEARCH" "$SLUG"; }
 type_file() { printf '%s/%s/type.txt' "$RESEARCH" "$SLUG"; }
@@ -555,6 +561,7 @@ action_keywords() {
     # next run read as a finished keyword choice and built a brief on.
     bash "$ROOT/scripts/llm_call.sh" "$dir/_keywords_prompt.txt" 0.2 "$seed" \
          "$ROOT/prompts/keywords.schema.json" > "$dir/keywords.json.new" || {
+      note_router $?
       rm -f "$dir/keywords.json.new"
       err "the call failed, see the message above. The prompt is kept at $dir/_keywords_prompt.txt"
       return 1
@@ -627,6 +634,7 @@ action_brief_stage() {
     say ""
     say "${BOLD}--- stage $((n + 1)) of 4: ${names[$n]}${RESET}"
     bash "$ROOT/scripts/brief_stages.sh" "$SLUG" --purpose "$PURPOSE" "${targs[@]}" || {
+      note_router $?
       err "the ${names[$n]} stage failed, see the message above. The stages before it are kept."
       return 1
     }
@@ -701,6 +709,7 @@ action_outline() {
     && bash "$ROOT/scripts/llm_call.sh" "$out/_outline_prompt.txt" 0.3 "$seed" > "$out/outline.md.new" || {
       # Same reason as the keyword stage: a failed call must not leave an empty
       # outline.md for the next run to read as done, or wipe the one replaced.
+      note_router $?
       rm -f "$out/outline.md.new"
       err "the call failed, see the message above."
       return 1
@@ -732,6 +741,7 @@ action_draft() {
   fi
   say "one model call per part, then a fact check per part. This takes a minute or two."
   bash "$ROOT/scripts/draft_sections.sh" "$BRIEFS/$SLUG.json" ${fresh:+$fresh} || {
+    note_router $?
     err "the draft stopped, see the message above."
     local stuck
     stuck=$(find "$out/sections" -maxdepth 1 -name '*.ERROR.md' 2>/dev/null | head -1)
@@ -768,7 +778,7 @@ auto_redo_numbers() {
     (( ${#hit[@]} )) || { err "the numbers ${unknown[*]} are in no single part, so there is nothing to redraft."; break; }
     say "auto: redrafting ${hit[*]} at seed $seed, for the numbers ${unknown[*]}"
     for p in "${hit[@]}"; do forget_part "$p"; done
-    DRAFT_SEED=$seed bash "$ROOT/scripts/draft_sections.sh" "$BRIEFS/$SLUG.json" || return 1
+    DRAFT_SEED=$seed bash "$ROOT/scripts/draft_sections.sh" "$BRIEFS/$SLUG.json" || { note_router $?; return 1; }
     run_check draft "$out/draft.md" "$out/outline.md" "$BRIEFS/$SLUG.json" draft && return 0
   done
   mapfile -t unknown < <(unsupported_numbers "$out/draft.md")
@@ -865,6 +875,7 @@ action_rewrite() {
   fi
   say "editing each part for readability, then re-checking its facts..."
   bash "$ROOT/scripts/rewrite_sections.sh" "$BRIEFS/$SLUG.json" ${fresh:+$fresh} || {
+    note_router $?
     err "the rewrite stopped, see the message above."
     return 1
   }
@@ -1038,7 +1049,7 @@ STOP_AFTER=" brief_stages "
 
 # RUN_STOP says why run_all stopped, for auto mode's exit code: empty when every
 # stage ran or was done, else blocked, input, failed, kept or read. A stage may
-# set it to decision or input before failing, and that reason is kept.
+# set it to decision, input or router before failing, and that reason is kept.
 RUN_STOP=""
 
 run_all() {
@@ -1236,7 +1247,7 @@ pick_slug() {
 AUTO_MISSING_INPUT=10   # an input file is missing or unreadable
 AUTO_DECISION=11        # a decision only a person should make
 AUTO_STAGE_FAILED=12    # a stage did not finish: a check still failing, or a call that errored
-AUTO_ROUTER=13          # the router is not serving qwen
+AUTO_ROUTER=13          # the router is not serving qwen, at the start or during the run
 
 auto_value() { # auto_value <key>: the auto.json value as text, empty when unset
   { [[ -r "$AUTO_FILE" ]] && jq -r --arg k "$1" '.[$k] // empty | tostring' "$AUTO_FILE"; } || true
@@ -1349,6 +1360,7 @@ auto_main() {
     "")            say "auto: finished"; return 0 ;;
     blocked|input) return $AUTO_MISSING_INPUT ;;
     kept|read|decision) return $AUTO_DECISION ;;
+    router)        return $AUTO_ROUTER ;;
     *)             return $AUTO_STAGE_FAILED ;;
   esac
 }

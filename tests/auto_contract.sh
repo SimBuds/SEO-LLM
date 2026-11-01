@@ -28,8 +28,9 @@ done
 # FAKE_POST and FAKE_MODELS are comma lists, one entry per call in order, the
 # last entry repeating. A POST entry is down (curl 7), noload (HTTP 500, the
 # model failed to load), toobig (HTTP 400, prompt over the context) or
-# reply:<file> (the file's text as the model's reply). A /models entry is ok or
-# down. Counters live in FAKE_DIR so each run starts from call 1.
+# reply:<file> (the file's text as the model's reply). A /models entry is ok,
+# down, or noqwen (a router up but serving only gemma). Counters live in
+# FAKE_DIR so each run starts from call 1.
 mkdir -p "$WORK/bin"
 cat > "$WORK/bin/curl" <<'FAKE'
 #!/usr/bin/env bash
@@ -48,7 +49,9 @@ case "$url" in
     mode=$(pick "${FAKE_MODELS:-ok}" models.count)
     echo "models $mode" >> "$FAKE_DIR/calls.log"
     [[ "$mode" == down ]] && { echo "curl: (7) Failed to connect to the fake router" >&2; exit 7; }
-    printf '%s\n' '{"data":[{"id":"qwen","status":{"value":"loaded"},"meta":{"n_ctx":65536}}]}'
+    id=qwen
+    [[ "$mode" == noqwen ]] && id=gemma
+    printf '{"data":[{"id":"%s","status":{"value":"loaded"},"meta":{"n_ctx":65536}}]}\n' "$id"
     ;;
   */v1/chat/completions)
     cat > /dev/null
@@ -249,6 +252,92 @@ expect "outline call succeeds: outline.md is the reply" \
   "outline.md differs from the reply, rc $RC" \
   same_file "$FIX/outline.md" "$T/outputs/$SLUG/outline.md"
 expect "outline call succeeds: no .new file left" "a .new file is left" no_leftovers
+
+# --- Phase 92: a router that cannot serve the model exits 13 ---------------
+# The wrapper alone first, for the code it gives each kind of failure, then
+# --auto, for that code reaching the exit code from each stage that calls it.
+
+printf '%s\n' 'Say hello.' > "$FIX/prompt.txt"
+printf '%s\n' 'Hello.' > "$FIX/hello.txt"
+
+# wrapper <post-modes> [models-modes]: llm_call.sh on its own, code in RC
+wrapper() {
+  rm -f "$T"/fake/*
+  env FAKE_DIR="$T/fake" FAKE_POST="$1" FAKE_MODELS="${2:-ok}" \
+    timeout 60 bash "$ROOT/scripts/llm_call.sh" "$FIX/prompt.txt" 0.2 1 > "$T/stdout.txt" 2> "$T/stderr.txt"
+  RC=$?
+}
+
+tree wrapper
+wrapper down
+expect "wrapper: a chat call that cannot connect exits 7" "rc $RC" test "$RC" -eq 7
+wrapper noload
+expect "wrapper: a model the router failed to load exits 75" "rc $RC" test "$RC" -eq 75
+expect "wrapper: the load failure's body is still printed" "stderr: $(head -c 200 "$T/stderr.txt")" \
+  saw "$T/stderr.txt" "model name=qwen failed to load"
+wrapper toobig
+expect "wrapper: an oversized prompt still exits 22" "rc $RC" test "$RC" -eq 22
+wrapper "reply:$FIX/hello.txt"
+expect "wrapper: a reply is printed and exits 0" "rc $RC, stdout $(head -c 200 "$T/stdout.txt")" \
+  bash -c '[[ $2 -eq 0 ]] && cmp -s "$1" "$3"' _ "$T/stdout.txt" "$RC" "$FIX/hello.txt"
+wrapper down down
+expect "wrapper: /models unreachable exits 7" "rc $RC" test "$RC" -eq 7
+
+tree auto-kw-down
+seed_research
+FAKE_POST=down auto
+expect "--auto: keyword call that cannot connect exits 13" "rc $RC" test "$RC" -eq 13
+
+tree auto-kw-noload
+seed_research
+FAKE_POST=noload auto
+expect "--auto: keyword call whose model failed to load exits 13" "rc $RC" test "$RC" -eq 13
+
+tree auto-kw-toobig
+seed_research
+FAKE_POST=toobig auto
+expect "--auto: keyword call with an oversized prompt still exits 12" "rc $RC" test "$RC" -eq 12
+
+tree auto-outline-down
+seed_brief
+FAKE_POST=down auto
+expect "--auto: outline call that cannot connect exits 13" "rc $RC" test "$RC" -eq 13
+
+tree auto-draft-down
+seed_brief
+mkdir -p "$T/outputs/$SLUG"
+cp "$FIX/outline.md" "$T/outputs/$SLUG/outline.md"
+touch -d '1 hour ago' "$T/briefs/$SLUG.json"
+FAKE_POST=down auto
+expect "--auto: the draft made its first part call" "no chat call in $(cat "$T/fake/calls.log" 2>/dev/null)" \
+  bash -c 'sed -n "/^--- Draft/,\$p" "$1" | grep -qF "the draft stopped" && grep -q "^post down" "$2"' _ "$T/out.txt" "$T/fake/calls.log"
+expect "--auto: draft part call that cannot connect exits 13" "rc $RC" test "$RC" -eq 13
+
+tree auto-router-gone
+seed_research
+FAKE_MODELS="ok,down" FAKE_POST=down auto
+expect "--auto: router listed at the preflight but gone at the next stage exits 13" "rc $RC" test "$RC" -eq 13
+expect "--auto: router gone at the next stage: no chat call was made" "calls: $(paste -sd' ' "$T/fake/calls.log")" \
+  bash -c '! grep -q "^post" "$1"' _ "$T/fake/calls.log"
+
+# Only the stage's own router check can catch this one: the wrapper would exit 5
+# for a model missing from /models, which is not a router-down code.
+tree auto-qwen-gone
+seed_research
+FAKE_MODELS="ok,noqwen" FAKE_POST=down auto
+expect "--auto: router up but no longer serving qwen at the next stage exits 13" "rc $RC" test "$RC" -eq 13
+
+tree auto-preflight-down
+seed_research
+FAKE_MODELS=down auto
+expect "--auto: router down at the preflight exits 13" "rc $RC" test "$RC" -eq 13
+
+tree menu-kw-down
+seed_research
+FAKE_POST=down menu '3\n\nq\n'
+expect "menu: a router failure at a picked stage reports the call and returns to the menu" \
+  "rc $RC, or the failed call or the second menu is missing" \
+  bash -c '[[ $2 -eq 0 ]] && grep -qF "the call failed" "$1" && (( $(grep -c "Choose: " "$1") >= 2 ))' _ "$T/menu.txt" "$RC"
 
 echo
 if (( FAILED )); then
