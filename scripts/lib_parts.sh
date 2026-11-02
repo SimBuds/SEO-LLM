@@ -5,13 +5,24 @@
 
 # The llm_call.sh exit codes that mean the router could not serve the model at
 # all, rather than that this one request failed: 7 is curl's "could not
-# connect", 75 is the wrapper's own for a model the router failed to load, which
-# is almost always another process holding the GPU (curl has not used 75 since
-# 7.82). Both pass up through a stage unchanged, so ./seo --auto exits 13 and its
-# caller retries later instead of reading the log.
+# connect", 52 and 56 are curl's empty reply and dropped connection, 75 is the
+# wrapper's own for a model the router failed to load or is still loading (almost
+# always another process holding the GPU), and 76 the wrapper's own for a model
+# missing from /models (curl has used neither 75 nor 76 since 7.82). Each passes
+# up through a stage unchanged, so ./seo --auto exits 13 and its caller retries
+# later instead of reading the log. A timeout (28) is not here: a read that runs
+# out is not retried forever, the same rule Jobhunt applies.
 ROUTER_UNREACHABLE=7
+ROUTER_EMPTY_REPLY=52
+ROUTER_CONNECTION_DROPPED=56
 ROUTER_LOAD_FAILED=75
-router_down() { (( $1 == ROUTER_UNREACHABLE || $1 == ROUTER_LOAD_FAILED )); }
+ROUTER_MODEL_MISSING=76
+router_down() {
+  case "$1" in
+    "$ROUTER_UNREACHABLE"|"$ROUTER_EMPTY_REPLY"|"$ROUTER_CONNECTION_DROPPED"|"$ROUTER_LOAD_FAILED"|"$ROUTER_MODEL_MISSING") return 0 ;;
+  esac
+  return 1
+}
 
 # Sentences with absolute wording, used by the verifier hints and the checks.
 # A sentence starts at a line start or after whitespace, never mid-word, and a

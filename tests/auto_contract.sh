@@ -38,12 +38,14 @@ done
 # --- the fake router -------------------------------------------------------
 # FAKE_POST and FAKE_MODELS are comma lists, one entry per call in order, the
 # last entry repeating. A POST entry is down (curl 7), noload (HTTP 500, the
-# model failed to load), toobig (HTTP 400, prompt over the context), timeout
-# (curl 28), probe (logs whether the file FAKE_PROBE exists, then curl 7), slow
+# model failed to load), loading (HTTP 503, the model still loading), toobig
+# (HTTP 400, prompt over the context), timeout (curl 28), empty (curl 52), recv
+# (curl 56), probe (logs whether the file FAKE_PROBE exists, then curl 7), slow
 # (curl 7 after 3 seconds, so a run stays busy) or reply:<file> (the file's text
-# as the model's reply). A /models entry is ok,
-# down, or noqwen (a router up but serving only gemma). Counters live in
-# FAKE_DIR so each run starts from call 1.
+# as the model's reply). A /models entry is ok, down, noqwen (a router up but
+# serving only gemma), noctx (qwen listed with no context size) or badjson (a
+# reply that is not JSON). Counters live in FAKE_DIR so each run starts from
+# call 1.
 mkdir -p "$WORK/bin"
 cat > "$WORK/bin/curl" <<'FAKE'
 #!/usr/bin/env bash
@@ -64,6 +66,8 @@ case "$url" in
     [[ "$mode" == down ]] && { echo "curl: (7) Failed to connect to the fake router" >&2; exit 7; }
     id=qwen
     [[ "$mode" == noqwen ]] && id=gemma
+    [[ "$mode" == badjson ]] && { echo "not json"; exit 0; }
+    [[ "$mode" == noctx ]] && { printf '{"data":[{"id":"qwen","status":{"value":"unloaded"}}]}\n'; exit 0; }
     printf '{"data":[{"id":"%s","status":{"value":"loaded"},"meta":{"n_ctx":65536}}]}\n' "$id"
     ;;
   */v1/chat/completions)
@@ -73,6 +77,9 @@ case "$url" in
     case "$mode" in
       down)   echo "curl: (7) Failed to connect to the fake router" >&2; exit 7 ;;
       noload) printf '%s' '{"error":{"code":500,"message":"model name=qwen failed to load","type":"server_error"}}'; exit 22 ;;
+      empty)  echo "curl: (52) Empty reply from server" >&2; exit 52 ;;
+      recv)   echo "curl: (56) Recv failure: Connection reset by peer" >&2; exit 56 ;;
+      loading) printf '%s' '{"error":{"code":503,"message":"Loading model","type":"unavailable_error"}}'; exit 22 ;;
       toobig) printf '%s' '{"error":{"code":400,"message":"the request exceeds the available context size, try increasing it","type":"exceed_context_size_error"}}'; exit 22 ;;
       timeout) echo "curl: (28) Operation timed out after 120000 milliseconds with 0 bytes received" >&2; exit 28 ;;
       slow)   sleep 3.01; echo "curl: (7) Failed to connect to the fake router" >&2; exit 7 ;;
@@ -777,6 +784,46 @@ t0=$(date +%s%N); kill -TERM -- "-$BG"
 wait "$BG"
 RC=$?; STOP_MS=$(( ($(date +%s%N) - t0) / 1000000 ))
 sig_case "signal: SIGTERM to the run's process group, the documented way" TERM 143
+
+# --- Phase 100: every way the router can be gone exits 13 -------------------
+# A dropped connection, a model still loading and qwen gone from /models all
+# meant 12 before, "read the log", for an outage a retry would get past.
+
+tree wrapper-100
+wrapper empty
+expect "wrapper: an empty reply passes curl's 52 up" "rc $RC" test "$RC" -eq 52
+wrapper recv
+expect "wrapper: a dropped connection passes curl's 56 up" "rc $RC" test "$RC" -eq 56
+wrapper loading
+expect "wrapper: a model still loading (HTTP 503) exits 75" "rc $RC" test "$RC" -eq 75
+expect "wrapper: the loading body is still printed" "stderr: $(head -c 200 "$T/stderr.txt")" saw "$T/stderr.txt" "Loading model"
+wrapper down noqwen
+expect "wrapper: qwen missing from /models exits 76" "rc $RC" test "$RC" -eq 76
+wrapper down noctx
+expect "wrapper: qwen listed with no context size still exits 5" "rc $RC" test "$RC" -eq 5
+wrapper down badjson
+expect "wrapper: a /models reply that is not JSON still exits 5" "rc $RC" test "$RC" -eq 5
+wrapper timeout
+expect "wrapper: a timeout still exits 28" "rc $RC" test "$RC" -eq 28
+
+# auto_100 <case> <expected> <post-modes> [models-modes]: the keyword call made
+# under that failure, on a fresh tree
+auto_100() {
+  N100=$(( ${N100:-0} + 1 ))
+  tree "auto-100-$N100"   # numbered: a case name with spaces would split env_for's paths
+  seed_research
+  FAKE_POST="$3" FAKE_MODELS="${4:-ok}" auto
+  expect "--auto: $1 exits $2" "rc $RC, calls: $(paste -sd' ' "$T/fake/calls.log")" test "$RC" -eq "$2"
+}
+auto_100 "an empty reply at the keyword call" 13 empty
+auto_100 "a dropped connection at the keyword call" 13 recv
+auto_100 "a model still loading at the keyword call" 13 loading
+# The preflight and the stage's own router check read /models first, so the
+# third read is the wrapper's, the one between the check and the call.
+auto_100 "qwen gone between the stage's check and its call" 13 down "ok,ok,noqwen"
+auto_100 "qwen listed with no context size at the call" 12 down "ok,ok,noctx"
+auto_100 "a /models reply that is not JSON at the call" 12 down "ok,ok,badjson"
+auto_100 "a timeout at the keyword call" 12 timeout
 
 echo
 if (( FAILED )); then

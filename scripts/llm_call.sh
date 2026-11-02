@@ -6,7 +6,9 @@
 # With a schema file, the router constrains the reply to that JSON schema.
 # Reads the router's served context size first and refuses to call below MIN_CTX.
 # Prints the reply to stdout. Exits non-zero on HTTP error or an empty reply,
-# with 75 (ROUTER_LOAD_FAILED in lib_parts.sh) when the router failed to load the model.
+# with 75 (ROUTER_LOAD_FAILED in lib_parts.sh) when the router failed to load the
+# model or is still loading it, and 76 (ROUTER_MODEL_MISSING) when /models does
+# not list it.
 
 set -euo pipefail
 
@@ -55,6 +57,17 @@ fi
 # status.args still carry --ctx-size, so this never forces a model load.
 MODELS_JSON=$(curl -sS --fail-with-body "$HOST/models") \
   || { rc=$?; echo "$MODELS_JSON" >&2; echo "cannot read $HOST/models to check context size" >&2; exit "$rc"; }
+
+# A model gone from a /models list that parses is the router's state, so it gets
+# its own code, and ./seo --auto exits 13 for it. A reply that does not parse, or
+# an entry with no context size, stays on jq's 5 below, whose message says which:
+# neither means the router dropped the model. The probe's own parse error is not
+# shown, because the jq below reports the same reply in full.
+if jq -e 'type == "object"' <<< "$MODELS_JSON" > /dev/null 2>&1 \
+   && ! jq -e --arg m "$MODEL" 'any(.data[]?; .id == $m)' <<< "$MODELS_JSON" > /dev/null; then
+  echo "model not served by the router: $MODEL" >&2
+  exit "$ROUTER_MODEL_MISSING"
+fi
 
 SERVED_CTX=$(jq -er --arg m "$MODEL" '
   ([.data[]? | select(.id == $m)][0] // error("model not served by the router: " + $m)) as $e
@@ -112,7 +125,8 @@ RESPONSE=$(curl -sS --fail-with-body ${TIMEOUT:+--max-time "$TIMEOUT"} -X POST "
   --data-binary @- <<< "$PAYLOAD") || {
   rc=$?
   echo "$RESPONSE" >&2
-  (( rc == 22 )) && [[ "$RESPONSE" == *"failed to load"* ]] && exit "$ROUTER_LOAD_FAILED"
+  # A 503 "Loading model" is the same state caught earlier: the model is not up yet.
+  (( rc == 22 )) && [[ "$RESPONSE" == *"failed to load"* || "$RESPONSE" == *"Loading model"* ]] && exit "$ROUTER_LOAD_FAILED"
   exit "$rc"
 }
 
