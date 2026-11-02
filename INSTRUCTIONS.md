@@ -216,10 +216,13 @@ as Hermes. The inputs are the same files the menu reads, plus an optional
 `research/<slug>/auto.json` for the live URL, the word count and whether to
 rebuild. Every input is checked before anything runs, each yes or no takes its safe
 default, and the exit code says what happened: 0 finished, 10 an input missing, 11
-a decision for a person, 12 a stage that did not finish, 13 the router down. Each
-run also writes `outputs/<slug>/status.json` with the same code, why it stopped,
-every stage's state, and the inputs to supply or the decision waiting. A
-flagged number is redrafted, never accepted, and the keyword is never swapped.
+a decision for a person, 12 a stage that did not finish, 13 the router down, 14 the
+page busy with another run. Each run also writes `outputs/<slug>/status.json` with
+the same code, why it stopped, every stage's state, and the inputs to supply or the
+decision waiting, except a 14, which writes nothing. One run works on a page at a
+time: `--auto` and the menu hold `outputs/<slug>/.lock`, and the menu asks for
+another page when the one picked is busy. A flagged number is redrafted, never
+accepted, and the keyword is never swapped.
 After a 0 the caller runs `claude -p "/seo-audit <slug>" --settings
 .claude/settings.json` from the repo root. README.md "Running unattended" has the
 input table, the keys and a scheduler example.
@@ -300,6 +303,7 @@ Driven from Claude Code, it is the seven commands in order:
 | `research/<slug>/auto.json` | you or a scheduler | The answers `./seo --auto` reads that no other file holds |
 | `outputs/<slug>/run.log` | `./seo --auto` | Each unattended run's plan and output |
 | `outputs/<slug>/status.json` | `./seo --auto` | The last unattended run's outcome as JSON |
+| `outputs/<slug>/.lock` | `./seo --auto` and the menu | Held by the run working on the page |
 | `outputs/<slug>/audit.md` | audit | The verdict on `final.md` |
 
 The prompt files are kept on purpose. When a result looks wrong, they show exactly what the model was asked.

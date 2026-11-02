@@ -195,6 +195,7 @@ outputs/<brief-slug>/
 │   └── ...                  # NN-<heading-slug>.rejected-seedN.md for failed edits
 ├── final.md
 ├── status.json              # the last ./seo --auto run's outcome, replaced on every run (Phase 94)
+├── .lock                    # held with flock by the run working on this page (Phase 95)
 └── meta.json                # planned (Phase 6)
 ```
 
@@ -458,11 +459,12 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - `/seo-audit` fails text broken as written as well as unsupported specifics. Its first run passed the how-to article whose cleaning steps the fact checker had turned into "Clean the parts. Clean the parts.", and that PASS would have sent a broken article on. The cause is on the Deferred list.
 - The settings rule is `Edit(outputs/**/audit.md)`. A leading `/` anchors to `.claude/` and denied the write. Claude Code ignores a project allowlist in an untrusted workspace, so the documented audit call passes `--settings .claude/settings.json`.
 
-### Phases 91 to 95: A complete contract for an automated caller (in progress, 2026-11-01)
+### Phases 91 to 95: A complete contract for an automated caller (done 2026-11-02)
 - Why: a hub service in its own repo writes a page's inputs, runs `./seo --auto <slug>`, then `/seo-audit <slug>`, and puts the page in Casey's review queue. It shares one queue with Jobhunt, which is being aligned to this repo's exit codes, so 0, 2 and 10 to 13 keep their meanings.
 - 91: a failed keyword or outline call left a zero-byte `keywords.json` or `outline.md` that the next run read as done. The reply now lands in `<file>.new` and moves into place only on success. `tests/auto_contract.sh` started here, with a fake `curl` in place of the router.
 - 92 and 93: a router that cannot serve the model ends `--auto` with 13 from every stage. The wrapper gives a model that failed to load its own exit, 75. Before, a mid-run outage exited 12, the brief stages turned it into exit 3, and the rewrite and the fact check let the run exit 0 with an unedited or unchecked article.
 - 94: every exit with a valid slug writes `outputs/<slug>/status.json` (shape in README "Running unattended"). The old file is deleted when the run starts, so no file after a run means it died. stdout and `run.log` were compared with the previous `seo.sh` across six exits and are identical apart from the timestamp.
+- 95: `--auto` and the menu hold `outputs/<slug>/.lock` with `flock -n`, and a second run on a held page exits 14 at once and writes nothing (Casey chose the code and the silent exit, 2026-11-01). The menu refuses a busy page at launch and at `s`, and the piped stage table takes no lock. The kernel drops the lock with the run's last process, so a kill leaves no stale lock. Killing only the main process leaves the stages running and the lock held until they end, so a caller stops a run by its process group (observed 2026-11-02).
 
 ### Phase 15: Docs + SEO knowledge base
 - Files: `README.md`, `docs/google/{helpful-content,eeat,semantic-search,ai-content-guidelines}.md`, link from system prompt.

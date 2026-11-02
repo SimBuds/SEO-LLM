@@ -1245,6 +1245,26 @@ pick_slug() {
   done
 }
 
+# lock_slug: hold outputs/<slug>/.lock on fd 9 for as long as this process runs,
+# so an --auto run and a menu session, or two of either, never work on one page
+# at once. -n refuses at once rather than waiting. The kernel drops the lock when
+# the last process holding fd 9 exits, a kill included, so there is never a
+# stale lock to clear. Opening fd 9 for another slug closes the old one.
+lock_slug() {
+  mkdir -p "$OUTPUTS/$SLUG"
+  exec 9> "$OUTPUTS/$SLUG/.lock"
+  flock -n 9
+}
+
+# pick_unlocked: pick_slug until the page picked is not held by another run.
+pick_unlocked() {
+  while pick_slug; do
+    lock_slug && return 0
+    err "$SLUG is busy: another ./seo run is working on it. Pick another page, or come back to it later."
+  done
+  return 1
+}
+
 # --- unattended -------------------------------------------------------------
 # ./seo --auto <slug> runs every remaining stage with no one at the keyboard, for
 # a scheduler or an agent, and exits with a code it can act on. Answers come from
@@ -1256,6 +1276,7 @@ AUTO_MISSING_INPUT=10   # an input file is missing or unreadable
 AUTO_DECISION=11        # a decision only a person should make
 AUTO_STAGE_FAILED=12    # a stage did not finish: a check still failing, or a call that errored
 AUTO_ROUTER=13          # the router is not serving qwen, at the start or during the run
+AUTO_BUSY=14            # another ./seo run holds this slug: retry later, nothing was written
 
 # What status.json carries beyond the exit code: the inputs to supply on a 10,
 # one "path<TAB>message" each with an empty path when the stop names a stage
@@ -1445,6 +1466,12 @@ if (( AUTO )); then
   BOLD=""; DIM=""; RESET=""; GREEN=""; YELLOW=""; RED=""
   AUTO_FILE="$RESEARCH/$SLUG/auto.json"
   mkdir -p "$OUTPUTS/$SLUG"
+  # Busy goes to stderr only: run.log and status.json belong to the run holding
+  # the lock, and a line or a file from this one would read as that run's.
+  lock_slug || {
+    echo "seo.sh: $SLUG is busy: another ./seo run holds $OUTPUTS/$SLUG/.lock. Retry later." >&2
+    exit $AUTO_BUSY
+  }
   auto_main < /dev/null 2>&1 | tee -a "$OUTPUTS/$SLUG/run.log"
   exit "${PIPESTATUS[0]}"
 fi
@@ -1461,7 +1488,10 @@ fi
 
 if [[ -z "$SLUG" ]]; then
   ask_is_live
-  pick_slug || exit 0
+  pick_unlocked || exit 0
+elif ! lock_slug; then
+  err "$SLUG is busy: another ./seo run is working on it. Try again later."
+  exit $AUTO_BUSY
 fi
 
 intake
@@ -1472,7 +1502,7 @@ while true; do
   case "$choice" in
     q|Q) exit 0 ;;
     # Switching pages re-runs the intake, because the page switched to may be new.
-    s|S) PAGE_IS_LIVE=""; pick_slug || exit 0; intake ;;
+    s|S) PAGE_IS_LIVE=""; pick_unlocked || exit 0; intake ;;
     a|A) run_all; read -r -p "Press enter for the menu. " _ ;;
     p|P) action_redo_part; read -r -p "Press enter for the menu. " _ ;;
     e|E) action_revise; read -r -p "Press enter for the menu. " _ ;;

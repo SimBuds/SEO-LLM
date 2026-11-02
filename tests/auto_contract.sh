@@ -17,13 +17,21 @@ set -uo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 WORK=$(mktemp -d)
-trap 'rm -rf "$WORK"' EXIT
+# Processes the lock cases start in the background are stopped on the way out,
+# even when a case fails part way and never reaches its own stop.
+HOLDERS=()
+cleanup() {
+  local p
+  for p in "${HOLDERS[@]}"; do [[ -e "/proc/$p" ]] && kill "$p"; done
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
 SLUG=contract-page
 # brief_stages.sh reads prompts/ relative to the working directory, as it does
 # when ./seo runs from the repo root, so the suite runs from there too.
 cd "$ROOT" || exit 2
 
-for tool in jq script timeout; do
+for tool in jq script timeout flock setsid; do
   command -v "$tool" > /dev/null || { echo "missing tool: $tool" >&2; exit 2; }
 done
 
@@ -31,8 +39,9 @@ done
 # FAKE_POST and FAKE_MODELS are comma lists, one entry per call in order, the
 # last entry repeating. A POST entry is down (curl 7), noload (HTTP 500, the
 # model failed to load), toobig (HTTP 400, prompt over the context), timeout
-# (curl 28), probe (logs whether the file FAKE_PROBE exists, then curl 7) or
-# reply:<file> (the file's text as the model's reply). A /models entry is ok,
+# (curl 28), probe (logs whether the file FAKE_PROBE exists, then curl 7), slow
+# (curl 7 after 3 seconds, so a run stays busy) or reply:<file> (the file's text
+# as the model's reply). A /models entry is ok,
 # down, or noqwen (a router up but serving only gemma). Counters live in
 # FAKE_DIR so each run starts from call 1.
 mkdir -p "$WORK/bin"
@@ -66,6 +75,7 @@ case "$url" in
       noload) printf '%s' '{"error":{"code":500,"message":"model name=qwen failed to load","type":"server_error"}}'; exit 22 ;;
       toobig) printf '%s' '{"error":{"code":400,"message":"the request exceeds the available context size, try increasing it","type":"exceed_context_size_error"}}'; exit 22 ;;
       timeout) echo "curl: (28) Operation timed out after 120000 milliseconds with 0 bytes received" >&2; exit 28 ;;
+      slow)   sleep 3; echo "curl: (7) Failed to connect to the fake router" >&2; exit 7 ;;
       probe)  if [[ -e "$FAKE_PROBE" ]]; then echo "probe present" >> "$FAKE_DIR/calls.log"; else echo "probe absent" >> "$FAKE_DIR/calls.log"; fi
               echo "curl: (7) Failed to connect to the fake router" >&2; exit 7 ;;
       reply:*) jq -n --rawfile c "${mode#reply:}" '{choices: [{message: {content: ($c | rtrimstr("\n"))}}]}' ;;
@@ -596,6 +606,123 @@ RC=$?
 expect "status: no slug exits 2" "rc $RC" test "$RC" -eq 2
 expect "status: exit 2 writes no status.json anywhere" "$(find "$T/outputs" -name status.json)" \
   test -z "$(find "$T/outputs" -name status.json)"
+
+# --- Phase 95: one run per slug ---------------------------------------------
+
+lockfile() { echo "$T/outputs/${1:-$SLUG}/.lock"; }
+# wait_for <file> <text>: up to ten seconds for a background run to print it
+wait_for() {
+  local i
+  for i in $(seq 100); do
+    [[ -e "$1" ]] && grep -qF -- "$2" "$1" && return 0
+    sleep 0.1
+  done
+  echo "gave up waiting for '$2' in $1" >&2
+  return 1
+}
+# is_held and is_free tell a lock someone holds from one that could not be read:
+# flock exits 75 only on a real conflict, and with any other code when it cannot
+# open the file, which a bare "! flock -n" would read as held.
+is_held() { flock -n -E 75 "$1" true; (( $? == 75 )); }
+is_free() { [[ -e "$1" ]] && flock -n -E 75 "$1" true; }
+# hold <lockfile>: a single process holding the lock as a run would, so killing
+# it is what releases the lock (bash execs sleep with the descriptor still open)
+hold() {
+  mkdir -p "$(dirname "$1")"
+  bash -c 'exec 9> "$1" && flock 9 && exec sleep 120' _ "$1" &
+  HOLDER=$!; HOLDERS+=("$HOLDER")
+  local i
+  for i in $(seq 50); do is_held "$1" && return 0; sleep 0.1; done
+  echo "the holder never took $1" >&2
+  return 1
+}
+unhold() { kill "$HOLDER"; wait "$HOLDER"; }
+# auto_bg <fake-dir> <post-modes>: an --auto run in the background, in its own
+# process group so a test can kill the whole run, PID in BG
+auto_bg() {
+  mkdir -p "$1"
+  env $(env_for) FAKE_DIR="$1" FAKE_POST="$2" setsid "$ROOT/seo" --auto "$SLUG" > "$1/run.txt" 2>&1 &
+  BG=$!; HOLDERS+=("$BG")
+}
+
+tree lock-auto-auto
+seed_research
+SLUG=third-page; seed_research; SLUG=contract-page
+auto_bg "$T/holder" slow
+wait_for "$T/holder/calls.log" "post slow"
+mkdir -p "$T/second"
+t0=$(date +%s%N)
+env $(env_for) FAKE_DIR="$T/second" "$ROOT/seo" --auto "$SLUG" > "$T/second/out.txt" 2>&1
+RC=$?
+ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+expect "lock: --auto on a slug another --auto holds exits 14" "rc $RC" test "$RC" -eq 14
+expect "lock: the busy exit is at once" "${ms} ms" test "$ms" -lt 1000
+expect "lock: the busy exit says so" "$(head -c 300 "$T/second/out.txt")" saw "$T/second/out.txt" "busy"
+expect "lock: the busy exit wrote no status.json while the holder runs" "$(status_text)" test ! -e "$(status_file)"
+mkdir -p "$T/third"
+SLUG=third-page
+env $(env_for) FAKE_DIR="$T/third" FAKE_POST=down "$ROOT/seo" --auto "$SLUG" > "$T/third/out.txt" 2>&1
+RC=$?
+SLUG=contract-page
+expect "lock: a different slug runs while this one is held" "rc $RC" test "$RC" -eq 13
+wait "$BG"
+RC=$?
+expect "lock: the holder finishes unaffected" "holder rc $RC, $(status_text)" \
+  bash -c '[[ $1 -eq 13 ]] && jq -e ".exit_code == 13" "$2" > /dev/null' _ "$RC" "$(status_file)"
+expect "lock: the busy exit added nothing to the holder's run.log" \
+  "$(grep -c "^seo --auto $SLUG, " "$T/outputs/$SLUG/run.log") run headers" \
+  test "$(grep -c "^seo --auto $SLUG, " "$T/outputs/$SLUG/run.log")" -eq 1
+FAKE_POST=down auto
+expect "lock: once the holder has exited, the next run proceeds" "rc $RC" test "$RC" -eq 13
+
+tree lock-killed
+seed_research
+auto_bg "$T/holder" slow
+wait_for "$T/holder/calls.log" "post slow"
+echo "note: bash reports the next run as Killed, because this case kills it on purpose" >&2
+kill -9 -- "-$BG"
+wait "$BG"
+FAKE_POST=down auto
+expect "lock: after the holding run is killed, the next run proceeds" "rc $RC" test "$RC" -eq 13
+
+tree lock-menu-auto
+seed_research
+{ sleep 4; printf 'q\n'; } | timeout 60 script -qec "env PATH='$PATH' LLM_HOST='$LLM_HOST' $(env_for) '$ROOT/seo' $SLUG" /dev/null > "$T/menu.txt" 2>&1 &
+menu_pid=$!; HOLDERS+=("$menu_pid")
+wait_for "$T/menu.txt" "Choose: "
+FAKE_POST=down auto
+expect "lock: --auto on a slug the menu holds exits 14" "rc $RC" test "$RC" -eq 14
+wait "$menu_pid"
+RC=$?
+expect "lock: the menu holding it carries on and quits normally" "menu rc $RC" test "$RC" -eq 0
+
+tree lock-auto-menu
+seed_research
+hold "$(lockfile)"
+menu ''
+expect "lock: the menu on a slug another run holds exits 14" "menu rc $RC" test "$RC" -eq 14
+expect "lock: the menu says the slug is busy" "$(tr -d '\r' < "$T/menu.txt" | head -c 300)" saw "$T/menu.txt" "busy"
+env $(env_for) "$ROOT/seo" "$SLUG" < /dev/null > "$T/table.txt" 2>&1
+RC=$?
+expect "lock: the piped stage table still prints while the slug is held" "rc $RC" \
+  bash -c '[[ $1 -eq 0 ]] && grep -qF "SEO pipeline: $2" "$3"' _ "$RC" "$SLUG" "$T/table.txt"
+unhold
+
+tree lock-switch
+seed_research
+SLUG=third-page; seed_research; SLUG=contract-page
+hold "$(lockfile other-busy)"
+{ printf 's\nother-busy\nthird-page\n'; sleep 4; printf 'q\n'; } \
+  | timeout 60 script -qec "env PATH='$PATH' LLM_HOST='$LLM_HOST' $(env_for) '$ROOT/seo' $SLUG" /dev/null > "$T/menu.txt" 2>&1 &
+menu_pid=$!; HOLDERS+=("$menu_pid")
+wait_for "$T/menu.txt" "SEO pipeline: third-page"
+expect "lock: s to a busy page says so and asks again" "no busy line for other-busy" saw "$T/menu.txt" "other-busy is busy"
+expect "lock: s released the page it left" "contract-page's lock is held or was never taken" is_free "$(lockfile)"
+expect "lock: s holds the page it moved to" "third-page's lock is not held" is_held "$(lockfile third-page)"
+wait "$menu_pid"
+RC=$?
+expect "lock: the menu quits normally after the switch" "menu rc $RC" test "$RC" -eq 0
+unhold
 
 echo
 if (( FAILED )); then

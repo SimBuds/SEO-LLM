@@ -658,6 +658,7 @@ orphan its outline.
 | `outputs/<slug>/final.md` | `/seo-rewrite` | The stitched, edited article |
 | `outputs/<slug>/run.log` | `./seo --auto` | Each unattended run's plan and output, appended |
 | `outputs/<slug>/status.json` | `./seo --auto` | The last unattended run's outcome as JSON, replaced on every run (see Running unattended) |
+| `outputs/<slug>/.lock` | `./seo --auto` and the menu | Empty. The run working on the page holds it with `flock` |
 | `outputs/<slug>/audit.md` | `/seo-audit` | The verdict on `final.md`, with every FAIL quoted |
 
 `outputs/` and `briefs/_ingest/` are gitignored. The `_`-prefixed prompt files are
@@ -734,6 +735,7 @@ The exit code is the contract:
 | 11 | A decision for a person: numbers the facts do not support after two redrafts, a keyword choice failing at both seeds, or a stale artifact with `rebuild` false | Hand the page to a person |
 | 12 | A stage did not finish: a check still failing at the seed limit, or a call that errored for a reason other than the router (an oversized prompt, a timeout) | Read the log |
 | 13 | The router is not serving `qwen`: down or without `qwen` when the run starts, or unreachable, without `qwen`, or unable to load the model during it | Run again later, and fix the router if it persists |
+| 14 | Another `./seo` run, unattended or the menu, is working on this page, so this one did nothing and wrote nothing | Run again later |
 | 2 | No slug, or not a valid one | Fix the call |
 
 Every input is checked before anything is fetched or a model is called, so a 10
@@ -779,10 +781,27 @@ is no valid slug to write under.
 Every key is always present, and a key that does not apply to the exit is `null` or
 an empty list.
 
+One run works on a page at a time. `./seo --auto` holds `outputs/<slug>/.lock` with
+`flock` for the whole run, and the menu holds it from the moment a page is picked.
+A second run on a held page exits 14 at once and writes nothing, not a `run.log`
+line and not a `status.json`, because both belong to the run holding the lock. It
+says so on stderr only. The menu refuses a held page too: `./seo <slug>` exits 14,
+and picking a busy page at the start or with `s` asks for another. The piped stage
+table only reads, so it takes no lock. The lock goes when the run's last process
+exits, a killed run included, so there is never a stale one to clear.
+
+Killing only the main `./seo` process does not stop a run. The stages it started
+keep running and keep the lock until they finish, and then that run writes its own
+`status.json` (observed 2026-11-02: SIGTERM to the main process exited it with 143
+while the lock stayed held). To stop a run, signal its whole process group, for
+example by starting it under `setsid` and killing the negative PID.
+
 Two decisions never happen unattended: a flagged number is never accepted as a
 fact, and the keyword is never swapped for another term. Both stay with a person,
 through `n` and the keyword stage at the menu.
 
+The caller runs the audit only after exit 0. Every other code means `final.md` is
+missing, stale, or not this run's, so an audit then would judge the wrong article.
 The scheduler runs the pipeline, then the audit, from the repo root:
 
 ```bash
