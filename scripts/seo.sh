@@ -1410,6 +1410,22 @@ auto_main() {
   return "$rc"
 }
 
+# auto_stop <exit-code>: trapped on TERM (143) and INT (130). Before this, a
+# SIGTERM to the main process exited it with 143 while its stages kept running,
+# kept the lock, and wrote their own status.json later (observed 2026-11-02).
+# The stages share this process group, so the trap stops them all, waits, and
+# writes status.json itself, because the run that would have written it was
+# stopped with them. The lock goes when this shell exits.
+auto_stop() {
+  trap '' TERM INT
+  kill -TERM -- "-$$"
+  wait
+  RUN_STOP="signal"
+  write_status "$1"
+  echo "seo.sh: $SLUG was stopped by a signal, status.json says so." >&2
+  exit "$1"
+}
+
 auto_run() {
   say "seo --auto $SLUG, $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   if [[ -e "$AUTO_FILE" ]] && ! jq -e 'type == "object"' "$AUTO_FILE" > /dev/null 2>&1; then
@@ -1461,6 +1477,13 @@ fi
 
 if (( AUTO )); then
   [[ -n "$SLUG" ]] || { echo "usage: seo.sh --auto <slug>" >&2; exit 2; }
+  # auto_stop signals this run's own process group, so the run has to lead one.
+  # A caller that used setsid already made it so. Started any other way (cron, a
+  # plain subprocess), it moves into a new session here, under the same PID, so
+  # the caller's handle still reaches it. (Phase 99, 2026-11-02)
+  if [[ "$(ps -o pgid= -p $$ | tr -d ' ')" != "$$" ]]; then
+    exec setsid "$BASH" "${BASH_SOURCE[0]}" --auto "$SLUG"
+  fi
   # The log is plain text, and stdin is closed so a prompt that was missed by
   # ask gets EOF and its default instead of waiting for nobody.
   BOLD=""; DIM=""; RESET=""; GREEN=""; YELLOW=""; RED=""
@@ -1472,8 +1495,13 @@ if (( AUTO )); then
     echo "seo.sh: $SLUG is busy: another ./seo run holds $OUTPUTS/$SLUG/.lock. Retry later." >&2
     exit $AUTO_BUSY
   }
-  auto_main < /dev/null 2>&1 | tee -a "$OUTPUTS/$SLUG/run.log"
-  exit "${PIPESTATUS[0]}"
+  # In the background so a signal reaches the trap while the run goes on. With
+  # pipefail, waiting on it returns auto_main's code, as PIPESTATUS[0] did.
+  auto_main < /dev/null 2>&1 | tee -a "$OUTPUTS/$SLUG/run.log" &
+  trap 'auto_stop 143' TERM
+  trap 'auto_stop 130' INT
+  wait $!
+  exit $?
 fi
 
 if [[ ! -t 0 ]]; then

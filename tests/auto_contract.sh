@@ -75,7 +75,7 @@ case "$url" in
       noload) printf '%s' '{"error":{"code":500,"message":"model name=qwen failed to load","type":"server_error"}}'; exit 22 ;;
       toobig) printf '%s' '{"error":{"code":400,"message":"the request exceeds the available context size, try increasing it","type":"exceed_context_size_error"}}'; exit 22 ;;
       timeout) echo "curl: (28) Operation timed out after 120000 milliseconds with 0 bytes received" >&2; exit 28 ;;
-      slow)   sleep 3; echo "curl: (7) Failed to connect to the fake router" >&2; exit 7 ;;
+      slow)   sleep 3.01; echo "curl: (7) Failed to connect to the fake router" >&2; exit 7 ;;
       probe)  if [[ -e "$FAKE_PROBE" ]]; then echo "probe present" >> "$FAKE_DIR/calls.log"; else echo "probe absent" >> "$FAKE_DIR/calls.log"; fi
               echo "curl: (7) Failed to connect to the fake router" >&2; exit 7 ;;
       reply:*) jq -n --rawfile c "${mode#reply:}" '{choices: [{message: {content: ($c | rtrimstr("\n"))}}]}' ;;
@@ -723,6 +723,60 @@ wait "$menu_pid"
 RC=$?
 expect "lock: the menu quits normally after the switch" "menu rc $RC" test "$RC" -eq 0
 unhold
+
+# --- Phase 99: a plain signal stops the whole run ---------------------------
+# Before, a SIGTERM to the main process left its stages running, holding the
+# lock, and writing their own status.json later (seen 2026-11-02).
+
+stage_alive() { pgrep -f '^sleep 3\.01$' | wc -l; }   # the fake's slow call
+pgid_of() { ps -o pgid= -p "$1" | tr -d ' '; }
+# sig_case <name> <signal> <code>: the run stopped by that signal stops within a
+# second (the fake call takes 3), leaves nothing
+# running, and leaves a status.json naming the signal and a free lock
+sig_case() {
+  expect "$1: exits $3" "rc $RC" test "$RC" -eq "$3"
+  expect "$1: stops at once, not after the stage finishes on its own" "${STOP_MS} ms" test "$STOP_MS" -lt 1000
+  expect "$1: no stage is left running" "$(stage_alive) left" test "$(stage_alive)" -eq 0
+  expect "$1: status.json has the full shape" "$(status_text)" shape
+  expect "$1: status.json says the run was stopped by a signal" "$(status_text)" \
+    status_has '.stop_reason == "signal" and .missing == [] and .reason == null and .final == null'
+  expect "$1: the lock is free at once" "the lock is held or missing" is_free "$(lockfile)"
+}
+
+tree sig-term
+seed_research
+mkdir -p "$T/bg"
+env $(env_for) FAKE_DIR="$T/bg" FAKE_POST=slow "$ROOT/seo" --auto "$SLUG" > "$T/bg/out.txt" 2>&1 &
+pid=$!; HOLDERS+=("$pid")
+wait_for "$T/bg/calls.log" "post slow"
+expect "signal: a run started without setsid leads its own process group, under the same PID" \
+  "pgid $(pgid_of "$pid") for PID $pid" test "$(pgid_of "$pid")" = "$pid"
+t0=$(date +%s%N); kill -TERM "$pid"
+wait "$pid"
+RC=$?; STOP_MS=$(( ($(date +%s%N) - t0) / 1000000 ))
+sig_case "signal: SIGTERM to the PID" TERM 143
+
+tree sig-int
+seed_research
+mkdir -p "$T/bg"
+# A job started with & from a script inherits SIGINT ignored, which bash cannot
+# trap, so the default is restored first, as a terminal or a supervisor gives it.
+env --default-signal=INT $(env_for) FAKE_DIR="$T/bg" FAKE_POST=slow "$ROOT/seo" --auto "$SLUG" > "$T/bg/out.txt" 2>&1 &
+pid=$!; HOLDERS+=("$pid")
+wait_for "$T/bg/calls.log" "post slow"
+t0=$(date +%s%N); kill -INT "$pid"
+wait "$pid"
+RC=$?; STOP_MS=$(( ($(date +%s%N) - t0) / 1000000 ))
+sig_case "signal: SIGINT to the PID" INT 130
+
+tree sig-group
+seed_research
+auto_bg "$T/holder" slow
+wait_for "$T/holder/calls.log" "post slow"
+t0=$(date +%s%N); kill -TERM -- "-$BG"
+wait "$BG"
+RC=$?; STOP_MS=$(( ($(date +%s%N) - t0) / 1000000 ))
+sig_case "signal: SIGTERM to the run's process group, the documented way" TERM 143
 
 echo
 if (( FAILED )); then

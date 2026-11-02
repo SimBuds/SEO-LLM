@@ -479,6 +479,7 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
   - Rerunning the old prompt gave byte-identical replies, all 48, so at a fixed seed the differences between prompts are real, not noise.
   - A part holding one glaring planted claim had its steps flagged far less (old prompt 2 of 27, against 9 or 10 for the same parts without it). A planted control can mask what it sits next to.
   - Neither wording met the bars, so `verify.md` is unchanged. The how-to steps are still flagged, and since Phase 97 they are deleted rather than stubbed.
+- 99: a plain SIGTERM or SIGINT to `./seo --auto` stops every stage within a second, releases the lock, and writes `status.json` with 143 or 130 and `stop_reason` `signal` (Casey chose the codes, 2026-11-02). The run leads its own process group, moving into a new session under the same PID when started without one, and a trap signals that group. `set -m` was the first design, and was dropped after a toy test showed it moves the stages out of the caller's group, so a `kill -9` of that group missed them. stdout, stderr and `run.log` of a normal run are byte-identical to before.
 
 ### Phase 15: Docs + SEO knowledge base
 - Files: `README.md`, `docs/google/{helpful-content,eeat,semantic-search,ai-content-guidelines}.md`, link from system prompt.

@@ -743,6 +743,7 @@ The exit code is the contract:
 | 12 | A stage did not finish: a check still failing at the seed limit, or a call that errored for a reason other than the router (an oversized prompt, a timeout) | Read the log |
 | 13 | The router is not serving `qwen`: down or without `qwen` when the run starts, or unreachable, without `qwen`, or unable to load the model during it | Run again later, and fix the router if it persists |
 | 14 | Another `./seo` run, unattended or the menu, is working on this page, so this one did nothing and wrote nothing | Run again later |
+| 143, 130 | Stopped by SIGTERM or SIGINT (128 plus the signal number). Every stage stopped, the lock released, `status.json` written | Whatever the caller intended when it sent the signal |
 | 2 | No slug, or not a valid one | Fix the call |
 
 Every input is checked before anything is fetched or a model is called, so a 10
@@ -778,7 +779,7 @@ is no valid slug to write under.
 | Key | What it holds |
 | --- | --- |
 | `slug`, `exit_code` | The slug, and the same exit code the process returned |
-| `stop_reason` | Why the run stopped: `input` or `blocked` (10), `kept` or `decision` (11), `failed` (12), `router` (13), or `null` when it finished |
+| `stop_reason` | Why the run stopped: `input` or `blocked` (10), `kept` or `decision` (11), `failed` (12), `router` (13), `signal` (143 or 130), or `null` when it finished |
 | `finished_at` | When the file was written, in UTC |
 | `stages` | All nine stages in menu order, each with its `state` (`done`, `ready`, `stale` or `blocked`) and `detail`, read from disk as the run ends |
 | `missing` | On 10 only: each input to supply, with its absolute `path` (`null` when a stage is blocked rather than a file missing) and a `message` |
@@ -797,11 +798,16 @@ and picking a busy page at the start or with `s` asks for another. The piped sta
 table only reads, so it takes no lock. The lock goes when the run's last process
 exits, a killed run included, so there is never a stale one to clear.
 
-Killing only the main `./seo` process does not stop a run. The stages it started
-keep running and keep the lock until they finish, and then that run writes its own
-`status.json` (observed 2026-11-02: SIGTERM to the main process exited it with 143
-while the lock stayed held). To stop a run, signal its whole process group, for
-example by starting it under `setsid` and killing the negative PID.
+A plain SIGTERM or SIGINT to the run's PID stops the whole run within a second. Every
+stage it started stops too, the lock is released, and `status.json` is written with
+`exit_code` 143 (TERM) or 130 (INT) and `stop_reason` `signal`. The run exits with
+the same code and says so in one line on stderr. To make that possible, a run that
+does not already lead a process group moves into its own session at start, under
+the same PID. The safe way still works and is still the way to use for SIGKILL:
+start the run under `setsid` and signal the negative PID. A SIGKILL leaves no
+`status.json`, since nothing is left to write it, but the lock goes with the
+processes. Before Phase 99, killing only the main process left the stages running
+and the lock held until they finished.
 
 Two decisions never happen unattended: a flagged number is never accepted as a
 fact, and the keyword is never swapped for another term. Both stay with a person,
