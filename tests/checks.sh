@@ -53,6 +53,63 @@ rc=$?
 expect_eq "check.sh draft: a draft naming Everything4Cats has no FAIL line" "0 0" \
   "$rc $(grep -c '^FAIL' "$WORK/draft/check.txt")"
 
+# --- verify_part: a stub replacement is a deletion --------------------------
+# Phase 97. On the how-to page (its brief's one fact is used below, which is
+# what let "parts" pass the new-words check) the fact checker replaced method sentences with
+# "Clean the parts.", so final.md read "Clean the parts. Clean the parts." The
+# replies below are the shapes it returned there. verify_part reaches the model
+# through llm_call.sh, so a fake curl answers with the canned reply.
+V="$WORK/verify"
+mkdir -p "$V/bin" "$V/part"
+cat > "$V/bin/curl" <<'FAKE'
+#!/usr/bin/env bash
+url=""; for a in "$@"; do [[ "$a" =~ ^https?:// ]] && url="$a"; done
+case "$url" in
+  */models) printf '%s\n' '{"data":[{"id":"qwen","status":{"value":"loaded"},"meta":{"n_ctx":65536}}]}' ;;
+  */v1/chat/completions) cat > /dev/null; jq -n --rawfile c "$FAKE_REPLY" '{choices: [{message: {content: $c}}]}' ;;
+  *) echo "fake curl: unexpected URL $url" >&2; exit 99 ;;
+esac
+FAKE
+chmod +x "$V/bin/curl"
+jq '.facts = ["Soak removable parts for about 15 to 20 minutes."]' briefs/example.json > "$V/brief.json"
+S_STUB1="After the soak, use a soft brush or an old toothbrush to clean each piece."
+S_STUB2="For the pump mechanism, ensure the small holes are clear of hair or dust."
+S_EMPTY="This method ensures your device operates efficiently and keeps the water fresh for your cat."
+S_KEEP="Rinse the filter under running water."
+S_HALF="The pump runs quietly at night in most homes."
+S_STRONG="Reassemble the fountain only when every component is completely dry and clean."
+S_NEW="Make sure no soap residue remains in the basin before refilling."
+S_CTA="Visit a local jeweler for a private consultation."
+printf '%s\n' "$S_STUB1 $S_STUB2 $S_EMPTY $S_KEEP $S_HALF $S_STRONG $S_NEW $S_CTA" > "$V/part/03-steps.md"
+jq -n --arg a "$S_STUB1" --arg b "$S_STUB2" --arg c "$S_EMPTY" --arg d "$S_HALF" --arg e "$S_STRONG" --arg f "$S_NEW" --arg g "$S_CTA" '{issues: [
+  {kind: "invented", sentence: $a, problem: "method not in facts", replacement: "Clean the parts."},
+  {kind: "invented", sentence: $b, problem: "method not in facts", replacement: "Clean the parts."},
+  {kind: "invented", sentence: $c, problem: "claim not in facts", replacement: ""},
+  {kind: "invented", sentence: $d, problem: "frequency not in facts", replacement: "The pump runs quietly at night."},
+  {kind: "strengthened", sentence: $e, problem: "overstated", replacement: "Reassemble the fountain."},
+  {kind: "invented", sentence: $f, problem: "detail not in facts", replacement: "Wipe the parts with vinegar."},
+  {kind: "invented", sentence: $g, problem: "call to action", replacement: "Visit."}]}' > "$V/reply.json"
+(
+  export PATH="$V/bin:$PATH" LLM_HOST="http://127.0.0.1:9" FAKE_REPLY="$V/reply.json"
+  BRIEF="$V/brief.json" VERIFY_MODEL=qwen
+  verify_part 03-steps "$V/part/03-steps.md" "$V/part" "" true
+) > "$V/verify.out" 2>&1
+TEXT=$(cat "$V/part/03-steps.md")
+has() { [[ "$TEXT" == *"$1"* ]] && echo yes || echo no; }
+expect_eq "verify_part: a replacement keeping under half its sentence deletes it, no stub left" "no no no" \
+  "$(has "Clean the parts.") $(has "$S_STUB1") $(has "$S_STUB2")"
+expect_eq "verify_part: an empty replacement still deletes the sentence" "no" "$(has "$S_EMPTY")"
+expect_eq "verify_part: a sentence with no issue is untouched" "yes" "$(has "$S_KEEP")"
+expect_eq "verify_part: a replacement keeping half or more is applied as written" "yes no" \
+  "$(has "The pump runs quietly at night.") $(has "$S_HALF")"
+expect_eq "verify_part: a strengthened fix dropping over half is still rejected, the sentence kept" "yes no" \
+  "$(has "$S_STRONG") $(has "Reassemble the fountain. ")"
+expect_eq "verify_part: a replacement bringing new words is still rejected" "yes no" \
+  "$(has "$S_NEW") $(has "vinegar")"
+expect_eq "verify_part: the CTA sentence is never touched" "yes" "$(has "$S_CTA")"
+expect_eq "verify_part: the report keeps each stub it turned into a deletion" "2" \
+  "$(jq '[.issues[] | select(.accepted and .replacement == "" and .stub == "Clean the parts.")] | length' "$V/part/03-steps.verify.json" 2>&1)"
+
 echo
 if (( FAILED )); then
   echo "$FAILED case(s) failed"

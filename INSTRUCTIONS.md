@@ -131,6 +131,7 @@ Editing a stage file is usually better than rerunning it, because a rerun is a f
    - The call lists sentences that invent a detail, overstate a fact, or contradict one, each with a replacement.
    - A replacement is swapped in word for word only if the original sentence is found and it doesn't touch the call to action.
    - It also can't add new words, and a fix to an overstated sentence can't drop more than half of it.
+   - Any other fix that keeps under half of its sentence deletes the sentence instead, so no stub like "Clean the parts." is left behind.
    - Findings are logged in `sections/NN-<heading>.verify.json`, and the text before the pass is kept in `.unverified.md`. If the fixed part fails its check, that text is restored.
    - A fact-check call that fails or times out leaves the part unverified with a warning. Rerunning retries it.
    - A router that can't serve the model stops the draft instead, so `draft.md` is never stitched with an unchecked part.

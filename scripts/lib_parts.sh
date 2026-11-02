@@ -152,6 +152,10 @@ verify_part() {
   # fixes that drop more than half the sentence (the claim was widened, so a
   # correct fix narrows it rather than gutting it). Deleting an invented
   # sentence outright stays allowed.
+  # An accepted replacement keeping under half of its sentence is applied as a
+  # deletion, its text kept in the report as "stub": on the how-to page five
+  # method sentences became "Clean the parts." or "Handle the filter.", and
+  # final.md read "Clean the parts. Clean the parts." (Phase 89 audit).
   jq --rawfile t "$orig" --argjson b "$(jq -c . "$BRIEF")" '
     def stems: ascii_downcase | [scan("[a-z]{4,}") | .[0:4]] | unique;
     def nwords: [scan("\\S+")] | length;
@@ -166,7 +170,9 @@ verify_part() {
             elif (.new_words | length) > 0 then "new words"
             elif .kind == "strengthened" and ((.replacement | nwords) * 2 < (.sentence | nwords)) then "drops over half"
             else null end)}
-        | . + {accepted: (.reject == null)})
+        | . + {accepted: (.reject == null)}
+        | if .accepted and .replacement != "" and ((.replacement | nwords) * 2 < (.sentence | nwords))
+          then . + {stub: .replacement, replacement: ""} else . end)
   ' "$report.tmp" > "$report"
   rm -f "$report.tmp"
   jq -rj --rawfile t "$orig" '
