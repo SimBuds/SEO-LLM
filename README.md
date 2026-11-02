@@ -78,6 +78,7 @@ SEO-LLM/
 ├── outputs/            # generated articles, one directory per brief (gitignored)
 ├── tests/              # auto_contract.sh: pins the ./seo --auto contract, with a fake curl in place of the router
 │                       # checks.sh: pins the deterministic helpers and checks, on fixtures
+│                       # live/verify_eval.sh: measures a prompts/verify.md change against the router, run by hand
 ├── AGENTS.md           # workflow contract for any AI agent in this repo
 ├── INSTRUCTIONS.md     # stage-by-stage walk through the whole pipeline
 ├── PLAN.md             # architecture + phased MVP plan
@@ -878,5 +879,7 @@ The fourth pillar, `IMPLEMENT.md`, is the execution tracker and holds the live s
 The short version: one phase at a time, at most five files per phase, walking-skeleton first, verify end-to-end against the live llama.cpp router, and end each phase with the literal handoff line.
 
 `bash tests/auto_contract.sh` pins what `./seo --auto` promises a caller: the file a failed stage leaves behind and the exit code the run ends with. It needs no router, no network and no GPU. A fake `curl` first on `PATH` stands in for the router, and every run writes to a scratch tree that is removed afterwards. It prints PASS or FAIL per case and exits 1 if any failed. Run it after any change to `scripts/seo.sh` or the scripts it drives. It says nothing about what the model writes, so it does not replace the live run. `bash tests/checks.sh` does the same for the rules underneath, such as what counts as a number, on fixtures in a temporary directory. Run it after any change to `scripts/lib_parts.sh` or `scripts/check.sh`.
+
+`tests/live/verify_eval.sh` is the one harness that calls the router, so it is run by hand, after asking whether the GPU is free, and never as part of the suite. `run` replays saved parts (the `.unverified.md` text the draft keeps) through the fact check at seeds 1 to 3, building each prompt exactly as `verify_part` does, and writes the replies to a scratch directory. It refuses one inside `outputs/`. `score` counts, per seed, how many sentences of each class in a label file were flagged. Use it before any change to `prompts/verify.md` ships. PLAN.md records the first measurement.
 
 This repo is SEO only. The tutor application that used to live alongside it now has its own repo, `~/Apps/Tutor-LLM`, and shares no code with this one.

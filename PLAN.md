@@ -110,7 +110,9 @@ SEO-LLM/
 ├── briefs/                  # JSON inputs
 ├── outputs/                 # <brief-slug>/{outline.md, sections/, draft.md, rewrite/, final.md}
 ├── tests/
-│   └── auto_contract.sh     # the --auto contract, pinned with a fake curl in place of the router
+│   ├── auto_contract.sh     # the --auto contract, pinned with a fake curl in place of the router
+│   ├── checks.sh            # the deterministic helpers and checks, on fixtures (Phase 96)
+│   └── live/verify_eval.sh  # replays saved parts through the fact check at several seeds and scores them, run by hand (Phase 98)
 ├── docs/
 │   └── google/              # planned (Phase 7): helpful-content.md, eeat.md, semantic-search.md, ai-content-guidelines.md
 ├── AGENTS.md
@@ -465,6 +467,18 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - 92 and 93: a router that cannot serve the model ends `--auto` with 13 from every stage. The wrapper gives a model that failed to load its own exit, 75. Before, a mid-run outage exited 12, the brief stages turned it into exit 3, and the rewrite and the fact check let the run exit 0 with an unedited or unchecked article.
 - 94: every exit with a valid slug writes `outputs/<slug>/status.json` (shape in README "Running unattended"). The old file is deleted when the run starts, so no file after a run means it died. stdout and `run.log` were compared with the previous `seo.sh` across six exits and are identical apart from the timestamp.
 - 95: `--auto` and the menu hold `outputs/<slug>/.lock` with `flock -n`, and a second run on a held page exits 14 at once and writes nothing (Casey chose the code and the silent exit, 2026-11-01). The menu refuses a busy page at launch and at `s`, and the piped stage table takes no lock. The kernel drops the lock with the run's last process, so a kill leaves no stale lock. Killing only the main process leaves the stages running and the lock held until they end, so a caller stops a run by its process group (observed 2026-11-02).
+
+### Phases 96 to 106: Clearing the Deferred list (in progress, 2026-11-02)
+- Why: the Deferred list had grown to 74 items, many of them findings or fixes already made. Casey approved a triage on 2026-11-02 and set the order: the everything4cats blockers first (the site launches at the end of November), then the hub contract, small fixes, doc drift, and experiments as candidates only.
+- 96: `numbers()` no longer reads a digit that continues a word, so "Everything4Cats" stops failing every page that names the brand. "250ml" still counts as 250. `tests/checks.sh` started here.
+- 97: a fact-check fix that keeps under half of its sentence now deletes the sentence, so no stub such as "Clean the parts." is left. On the how-to page's part 03 that turned 5 stubs into deletions.
+- 98, measured and not shipped: two wordings of a `verify.md` rule exempting plain how-to steps were run against the router with `tests/live/verify_eval.sh`. Inputs were the how-to page's 8 saved parts, plus copies with one planted unsupported claim each (a statistic, a brand, a decibel level, a warranty, a location and price, and three numbered steps carrying a figure). Each set ran at seeds 1 to 3, old prompt first, 96 calls per wording. Results:
+  - Plain steps still flagged, of 27 (3 steps carrying "all" were dropped, by the label rule set before the run): old prompt 9, 10 and 9, first wording 3 at every seed, second wording 8, 6 and 7. The bar was 0.
+  - The page's one fact ("Soak removable parts for about 15 to 20 minutes"), across its 4 sentences: old prompt 0, 0, 0 and 3 seeds, first wording 1, 0, 1 and 3, second 0, 0, 1 and 3. The bar was no change.
+  - The 8 planted claims: flagged at every seed by all three prompts.
+  - Rerunning the old prompt gave byte-identical replies, all 48, so at a fixed seed the differences between prompts are real, not noise.
+  - A part holding one glaring planted claim had its steps flagged far less (old prompt 2 of 27, against 9 or 10 for the same parts without it). A planted control can mask what it sits next to.
+  - Neither wording met the bars, so `verify.md` is unchanged. The how-to steps are still flagged, and since Phase 97 they are deleted rather than stubbed.
 
 ### Phase 15: Docs + SEO knowledge base
 - Files: `README.md`, `docs/google/{helpful-content,eeat,semantic-search,ai-content-guidelines}.md`, link from system prompt.
