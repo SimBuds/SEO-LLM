@@ -23,7 +23,10 @@ ABSOLUTE_SENTENCE='(^|[[:space:]])([^.!?]|\.[^[:space:]])*\b(all|every|always|ne
 # Numbers as written (4-6, 2.5, $2,500, 9.25), normalized: commas and
 # trailing dots dropped so "$2,500." and "2500" compare equal.
 # Ordered-list markers ("1. ") are dropped first: they are not claims.
-numbers() { sed -E 's/^[[:space:]]*[0-9]+\.[[:space:]]//' | grep -oE '[0-9][0-9,.]*' | sed -E 's/,//g; s/\.+$//' | sort -u || true; }
+# A digit run that continues a word is part of a name, not a figure:
+# "Everything4Cats" read as an invented 4 and failed every page naming the brand
+# (Phase 89 audit). A number that starts a token still counts, so "250ml" is 250.
+numbers() { sed -E 's/^[[:space:]]*[0-9]+\.[[:space:]]//' | grep -oP '(?<![[:alnum:]])[0-9][0-9,.]*' | sed -E 's/,//g; s/\.+$//' | sort -u || true; }
 
 # draft_factor <word_count>: how far above word_count the draft aims, in
 # percent. A lower factor for short pages was tried and left a thin-facts

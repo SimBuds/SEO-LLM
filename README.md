@@ -77,6 +77,7 @@ SEO-LLM/
 ├── briefs/             # user inputs (JSON)
 ├── outputs/            # generated articles, one directory per brief (gitignored)
 ├── tests/              # auto_contract.sh: pins the ./seo --auto contract, with a fake curl in place of the router
+│                       # checks.sh: pins the deterministic helpers and checks, on fixtures
 ├── AGENTS.md           # workflow contract for any AI agent in this repo
 ├── INSTRUCTIONS.md     # stage-by-stage walk through the whole pipeline
 ├── PLAN.md             # architecture + phased MVP plan
@@ -599,6 +600,11 @@ remaining caps were audited against the longest values observed and none is with
 | `keywords <keywords.json> <research.json> [suggested.txt]` | the file does not match the expected shape, a keyword absent from the research and from your suggestions, the primary keyword repeated as a secondary, a superlative in the rationale the figures contradict | no questions, fewer than 2 must-cover subtopics, research figures repeated in the reasoning, a live page whose title does not contain the chosen keyword |
 | `draft <draft.md> <outline.md> <brief.json> [percent]` (`draft` for `draft.md`) | H1/H2 differ from the outline, outline guidance lines left in, numbers absent from the facts and the outline | length outside ±15%, CTA missing from Conclusion, a keyword used more than twice, bolded keywords, numbers not in the facts or outline, sentences with absolute wording (all, every, guaranteed…) |
 
+A number, for every rule above, is a run of digits that starts a token. A digit
+that continues a word is part of a name, so "Everything4Cats", "MP3" and "H2O" are
+not checked, while "250ml" counts as 250 and must be in the facts. Spelled-out
+figures ("twice a week") are not read at all.
+
 The checks catch structure and invented digits, not invented prose, and that
 split is deliberate. **The local model generates, Claude Code audits**
 (PLAN.md principle 3). A rule that arithmetic or a lookup can settle lives in
@@ -871,6 +877,6 @@ The fourth pillar, `IMPLEMENT.md`, is the execution tracker and holds the live s
 
 The short version: one phase at a time, at most five files per phase, walking-skeleton first, verify end-to-end against the live llama.cpp router, and end each phase with the literal handoff line.
 
-`bash tests/auto_contract.sh` pins what `./seo --auto` promises a caller: the file a failed stage leaves behind and the exit code the run ends with. It needs no router, no network and no GPU. A fake `curl` first on `PATH` stands in for the router, and every run writes to a scratch tree that is removed afterwards. It prints PASS or FAIL per case and exits 1 if any failed. Run it after any change to `scripts/seo.sh` or the scripts it drives. It says nothing about what the model writes, so it does not replace the live run.
+`bash tests/auto_contract.sh` pins what `./seo --auto` promises a caller: the file a failed stage leaves behind and the exit code the run ends with. It needs no router, no network and no GPU. A fake `curl` first on `PATH` stands in for the router, and every run writes to a scratch tree that is removed afterwards. It prints PASS or FAIL per case and exits 1 if any failed. Run it after any change to `scripts/seo.sh` or the scripts it drives. It says nothing about what the model writes, so it does not replace the live run. `bash tests/checks.sh` does the same for the rules underneath, such as what counts as a number, on fixtures in a temporary directory. Run it after any change to `scripts/lib_parts.sh` or `scripts/check.sh`.
 
 This repo is SEO only. The tutor application that used to live alongside it now has its own repo, `~/Apps/Tutor-LLM`, and shares no code with this one.
