@@ -1,6 +1,6 @@
 ---
 name: seo-ingest
-description: Extract a JSON brief from a source document (.docx, .pdf, .md, or .txt) using the local llama.cpp router (model `qwen`) so the user doesn't have to hand-write briefs. Phase 3 stage — sits before /seo-outline. Use when the user runs /seo-ingest <file> or supplies a doc/PDF instead of a JSON brief.
+description: Extract a JSON brief from a source document (.docx, .pdf, .md, or .txt) using the local llama.cpp router (model `qwen`) so the user doesn't have to hand-write briefs, or with --text-only extract only the text, as a page's facts source. Phase 3 stage — sits before /seo-outline. Use when the user runs /seo-ingest <file> [--text-only] or supplies a doc/PDF instead of a JSON brief.
 ---
 
 # seo-ingest
@@ -10,22 +10,25 @@ Convert a source document into a `briefs/<slug>.json` brief that the rest of the
 ## Inputs
 
 - `$1` — path to a `.docx`, `.pdf`, `.md`, or `.txt` file. If missing, ask which file to ingest.
+- `$2` — optional `--text-only`: extract the text to `briefs/_ingest/<slug>.txt` and stop, with no model call and no brief. Use it when the document is a page's facts source for `/seo-brief`. Without it, ingest writes `briefs/<slug>.json`, and the brief merge later refuses to replace that file, so a facts source run through the full ingest blocks the page's merge.
+- `$2` — optional `--text-only`: extract the text to `briefs/_ingest/<slug>.txt` and stop, with no model call and no brief. Use it when the document is a page's facts source for `/seo-brief`. Without it, ingest writes `briefs/<slug>.json`, and the brief merge later refuses to replace that file, so a facts source run through the full ingest blocks the page's merge.
 
 ## Preconditions
 
-1. The llama.cpp router serves `qwen`: `curl -s localhost:8080/models | jq -er '.data[] | select(.id=="qwen") | .id'` prints `qwen`. If it prints nothing or exits non-zero, tell the user the router on `localhost:8080` is not serving `qwen` and stop.
+1. Skipped with `--text-only`, which makes no model call. Otherwise the llama.cpp router serves `qwen`: `curl -s localhost:8080/models | jq -er '.data[] | select(.id=="qwen") | .id'` prints `qwen`. If it prints nothing or exits non-zero, tell the user the router on `localhost:8080` is not serving `qwen` and stop.
 2. For `.docx`: `pandoc` is on `PATH`. For `.pdf`: `pdftotext` is on `PATH` (from `poppler-utils`). If a required extractor is missing for the file type given, tell the user the apt/pacman package to install and stop.
 
 ## Steps
 
 1. Inspect the file extension (lowercase). Reject anything other than `.docx`, `.pdf`, `.md`, `.txt` with a clear error.
 2. Derive the slug from the file's basename (lowercase, hyphens, no punctuation, no extension).
-3. If `briefs/<slug>.json` already exists, show it and ask before overwriting: the user may have edited it. Stop unless they confirm.
+3. If `briefs/<slug>.json` already exists, show it and ask before overwriting: the user may have edited it. Stop unless they confirm. With `--text-only` the brief is never written, so this check is skipped, and instead an existing `briefs/_ingest/<slug>.txt` is shown (its size and first lines) and replaced only if they confirm.
 4. Extract plain text to `briefs/_ingest/<slug>.txt` (create `briefs/_ingest/` if needed):
    - `.docx` → `pandoc -t plain "<file>" -o briefs/_ingest/<slug>.txt`
    - `.pdf`  → `pdftotext -layout "<file>" briefs/_ingest/<slug>.txt`
    - `.md` / `.txt` → copy the file to `briefs/_ingest/<slug>.txt`
 5. If the extracted text is empty or < 50 characters, stop and report the file likely has no text layer (PDFs may be scans — OCR is out of scope).
+   - With `--text-only`, stop here. Do not fill the prompt, call the model, or write `briefs/<slug>.json`. Report the source path, `briefs/_ingest/<slug>.txt` and its character count, and whether `research/<slug>/` exists. If it does not, warn that no page by that slug will read the file, and that it must be named after the page's slug. Then: *"The facts stage reads this file. Run `/seo-brief <slug>`, or pick the brief stages in `./seo <slug>`."*
 6. Fill the prompt: `bash scripts/fill_prompt.sh prompts/ingest.md --source briefs/_ingest/<slug>.txt > briefs/_ingest/<slug>.prompt.txt`. The script squeezes layout whitespace and cuts the text at 24 000 characters with a visible marker; if it prints `source truncated`, say so in the report.
 7. Run: `bash scripts/llm_call.sh briefs/_ingest/<slug>.prompt.txt 0.2 1 prompts/brief.schema.json > briefs/<slug>.json`. The schema argument makes the router return only a JSON object with the seven brief keys, so nothing needs stripping.
 8. Check: `bash scripts/check.sh brief briefs/<slug>.json briefs/_ingest/<slug>.txt`. It fails on a schema mismatch and warns on UI-referencing CTAs, weak keywords, an empty facts list, and fact numbers that do not appear in the source.

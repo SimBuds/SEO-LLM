@@ -209,7 +209,8 @@ router: serving qwen
   Editing a file still works and is sometimes quicker, but it is no longer the
   only way to change a decision.
 - **The facts the page may state are asked before the brief stages** and written
-  to `briefs/_ingest/<slug>.txt`, the same file `/seo-ingest` produces, so the
+  to `briefs/_ingest/<slug>.txt`, the same file `/seo-ingest` produces (`/seo-ingest
+  <file> --text-only` writes only that file, with no model call), so the
   facts stage reads them as it always has. Typing nothing is a real answer and
   the page stays general. If you then say the page recommends specific products,
   it says plainly that the sections will name none and offers the question again,

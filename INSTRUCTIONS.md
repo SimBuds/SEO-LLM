@@ -93,6 +93,7 @@ Editing a stage file is usually better than rerunning it, because a rerun is a f
 
 1. **Guard:** if `briefs/<slug>.json` already exists, it asks before overwriting it.
 2. **Extract:** the text is pulled out with `pdftotext` (PDF), `pandoc` (Word, not installed yet) or a plain copy (`.md`, `.txt`) into `briefs/_ingest/<slug>.txt`. Under 50 characters stops the run, since the PDF is probably a scan.
+   - **`--text-only`** stops here, with no model call and no brief, for a document that is a page's facts source. The full ingest would write `briefs/<slug>.json`, which the brief merge then refuses to replace. It asks before replacing an existing text file, and warns when no page by that slug exists.
 3. **Fill:** `fill_prompt.sh` squeezes extra spaces and cuts very long text at 24,000 characters, saying so when it does.
 4. **Model call:** Qwen at temperature 0.2 fills a fixed JSON format (`prompts/brief.schema.json`) with these fields:
    - topic, audience, tone
@@ -272,7 +273,7 @@ Driven from Claude Code, it is the seven commands in order:
 ```
 /seo-research client-page               # answer the page question, add exports and competitor URLs
 /seo-keywords client-page               # pick the target keyword
-/seo-ingest  briefs/client-page.pdf     # optional: a source document for the facts stage
+/seo-ingest  briefs/client-page.pdf --text-only   # optional: the facts source, text only
 /seo-brief   client-page                # four approved stages, then --merge
 /seo-outline briefs/client-page.json
 /seo-draft   briefs/client-page.json
