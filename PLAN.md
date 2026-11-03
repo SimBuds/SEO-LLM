@@ -196,6 +196,8 @@ outputs/<brief-slug>/
 │   ├── 01-<heading-slug>.{prompt.txt,md,verify.json,verify.prompt.txt,unverified.md}
 │   └── ...                  # NN-<heading-slug>.rejected-seedN.md for failed edits
 ├── final.md
+├── run.log                  # each ./seo --auto run's plan and output, appended (Phases 85 to 90)
+├── audit.md                 # /seo-audit's verdict on final.md, Verdict: PASS or FAIL on line 2 (Phase 89)
 ├── status.json              # the last ./seo --auto run's outcome, replaced on every run (Phase 94)
 ├── .lock                    # held with flock by the run working on this page (Phase 95)
 └── meta.json                # planned (Phase 6)
@@ -468,7 +470,7 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 - 94: every exit with a valid slug writes `outputs/<slug>/status.json` (shape in README "Running unattended"). The old file is deleted when the run starts, so no file after a run means it died. stdout and `run.log` were compared with the previous `seo.sh` across six exits and are identical apart from the timestamp.
 - 95: `--auto` and the menu hold `outputs/<slug>/.lock` with `flock -n`, and a second run on a held page exits 14 at once and writes nothing (Casey chose the code and the silent exit, 2026-11-01). The menu refuses a busy page at launch and at `s`, and the piped stage table takes no lock. The kernel drops the lock with the run's last process, so a kill leaves no stale lock. Killing only the main process leaves the stages running and the lock held until they end, so a caller stops a run by its process group (observed 2026-11-02).
 
-### Phases 96 to 106: Clearing the Deferred list (in progress, 2026-11-02)
+### Phases 96 to 106: Clearing the Deferred list (done 2026-11-03)
 - Why: the Deferred list had grown to 74 items, many of them findings or fixes already made. Casey approved a triage on 2026-11-02 and set the order: the everything4cats blockers first (the site launches at the end of November), then the hub contract, small fixes, doc drift, and experiments as candidates only.
 - 96: `numbers()` no longer reads a digit that continues a word, so "Everything4Cats" stops failing every page that names the brand. "250ml" still counts as 250. `tests/checks.sh` started here.
 - 97: a fact-check fix that keeps under half of its sentence now deletes the sentence, so no stub such as "Clean the parts." is left. On the how-to page's part 03 that turned 5 stubs into deletions.
@@ -480,12 +482,76 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
   - A part holding one glaring planted claim had its steps flagged far less (old prompt 2 of 27, against 9 or 10 for the same parts without it). A planted control can mask what it sits next to.
   - Neither wording met the bars, so `verify.md` is unchanged. The how-to steps are still flagged, and since Phase 97 they are deleted rather than stubbed.
 - 99: a plain SIGTERM or SIGINT to `./seo --auto` stops every stage within a second, releases the lock, and writes `status.json` with 143 or 130 and `stop_reason` `signal` (Casey chose the codes, 2026-11-02). The run leads its own process group, moving into a new session under the same PID when started without one, and a trap signals that group. `set -m` was the first design, and was dropped after a toy test showed it moves the stages out of the caller's group, so a `kill -9` of that group missed them. stdout, stderr and `run.log` of a normal run are byte-identical to before.
+- 100: every way the router can be gone mid-run now ends `--auto` with 13. `router_down` covers curl's 7, 52 and 56, the wrapper's 75 (a model that failed to load, or a 503 `Loading model`), and its new 76 (the model missing from a `/models` list that parses). A malformed `/models` reply and a missing context size keep the wrapper's 5, and a timeout (28) stays 12.
+- 101: `brief_stages.sh`, `research_collect.sh` and `fetch_page.sh` resolve their prompts and their research, briefs and cache defaults from their own repo, the way `fetch_sitemap.sh` already did, so `./seo` works from any directory. Before, a run started elsewhere looked for its exports and prompts there.
+- 102: export counts ignore the name's case, an export opening with a UTF-16 byte order mark is converted to UTF-8 before parsing, and `&ndash;` is decoded.
+- 103: `/seo-ingest <file> --text-only` extracts a page's facts source and stops, with no model call and no brief, so it no longer blocks the brief merge.
+- 104, measured: the keyword stage's call on both live slugs' saved prompts, seeds 1 to 3, at caps of 500 and 900. At 500, 3 of 6 rationales sat on the cap, cut. At 900, none did, and the longest was 738. Replies under 500 were byte-identical at 900. The primary keyword and the check verdict held in all 12. The same prompt and seed no longer reproduce the September file, so the router or model changed between deployments. Only a baseline taken in the same session is comparable.
+- 105: `rationale` is capped at 900, and a keyword reply with any field on its cap is reseeded once and never becomes `keywords.json`. Cut at both seeds, the stage fails (`--auto` 12).
+- 106: the docs caught up, and the Deferred list's findings and accepted limitations moved to "Findings and accepted limitations" below.
 
 ### Phase 15: Docs + SEO knowledge base
 - Files: `README.md`, `docs/google/{helpful-content,eeat,semantic-search,ai-content-guidelines}.md`, link from system prompt.
 - Goal: prompts ground in EEAT / helpful-content guidance, and the quickstart is documented.
 
 Deferred (post-MVP): SERP extraction, competitor analysis, RAG, autonomous research, internal linking, topical authority (Milestones 4 and 5 in the old plan).
+
+---
+
+## Findings and accepted limitations
+
+Moved from the IMPLEMENT.md Deferred list on 2026-11-03, one line each. A
+finding records something measured, fixed or corrected, kept so it is not
+argued again. A limitation is known and accepted rather than worth fixing. The
+tag in brackets finds the full entry in git history.
+
+**Draft and rewrite**
+- (Phase 74) Finding: the H3 ceiling was measured on two briefs over three seeds and does not cost section-count compliance. It only lowers the H3 count (14 against 18).
+- (2026-09-22) Finding: section compliance depends on the brief. The structure stage under-produced an opening, so outlines added sections, and `brief-type-how-to.md` now has the opening proposed and counted.
+- (2026-09-22) Finding: a part gets three seeds, because its first two failures had different causes. A third failure points at the brief or the outline, not the sample.
+- (Phase 65) Finding: an explicit word range in the part prompts did not tighten lengths over three runs, and was reverted. The model does not count words, so the budget is enforced after the fact.
+- (Phase 56) Finding: a part is stale only when the outline is strictly newer, because equal timestamps after a copy discarded every part.
+- (Phase 56) Finding: a redone part is checked against its budget like any part. 476 words against 340 sits exactly on the 140% bound and passes.
+- (Phase 46) Limitation: the rewrite can refuse to raise keyword density but cannot lower it. The whole-article cap of 2 is a WARN in `check.sh draft`.
+
+**Research inputs**
+- (Phase 75) Finding: both briefs rebuilt on the corrected research improved at the root, and every brief built before the fix used about a quarter of the competitor structure.
+- (Phase 71) Finding: the corrected word counts changed every collected page (1700 and 2277 became 997 and 1318 on one). A brief keeps its length until a new page or a deliberate re-merge.
+- (Phase 40) Finding: `keywords_total` counts the merged union of the exports, not a sum per file, which is correct as built.
+- (Phase 29) Finding: Ahrefs' own views disagree on one keyword (2000 in the SERP overview, 150 in Keywords Explorer), so any single figure is one vendor view.
+- (2026-09-22) Limitation: a competitor that builds its headings in JavaScript gives only its H1, because `fetch_page.sh` reads the static HTML.
+- (Phase 47) Limitation: an export naming dozens of brands makes almost any brand groundable in a call to action.
+- (Phase 42) Limitation: the furniture list is a fixed set of English headings, so another language or an unusual label still lets navigation through. Extending it is a data change.
+- (Phase 44) Limitation: the picks warning reads headings only, not a call to action promising picks while the facts are empty. The audit reads the call to action.
+- (Phase 40) Limitation: the keyword cap keeps the top of the volume sort. Choosing by fit would put a model call on a deterministic surface.
+- (Phase 7) Limitation: a CSV field containing a newline is not supported, and neither Ahrefs nor Search Console emits one.
+- (Phase 6) Limitation: `fetch_page.sh` extracts with `grep` and `sed`, so headings built from nested tags or by JavaScript are misread. Going without an HTML parser is deliberate.
+
+**The menu**
+- (Phase 68) Finding: a prompt inside a `while read` loop fed by a process substitution reads its answer from the loop's input, never the terminal. Collect first, then ask.
+- (Phase 67) Finding: `proper_noun_keywords` excludes the brief's Title Case `topic`, which had made 4 of 5 keywords look like lowercased brand names.
+- (Phase 38) Finding: the export prompt checks each path as it is typed, so it cannot use `read_lines()`, which has two callers.
+- (Phase 57) Limitation: changing an answer clears the brief stages but keeps `briefs/<slug>.json` until the next merge, which asks before replacing it.
+- (Phase 38) Limitation: `./seo <slug>` with no `research.json` asks the export and competitor questions, and a blank answer passes straight through.
+
+**Keyword stage**
+- (Phase 21) Limitation: the cannibalization match reads URL paths only. Matching titles would mean crawling the whole inventory.
+
+**Brief stages**
+- (2026-09-22, Phase 66) Finding: telling the outline prompt to group subtopics made it worse (9 sections and 22 H3s). The fix was upstream: the structure stage now gets the length and a section ceiling.
+- (Phase 52) Finding: `brief_stages.sh` never passed `--source` to the facts prompt, which survived only because a missing source returns early. Fixed then.
+- (2026-09-21) Finding: "Pet Valu" in a call to action was grounded, not invented, because it is a keyword in the Ahrefs export. Phase 47 checks this.
+- (Phase 60 audit) Limitation: a section can cite a real research string unrelated to it, and `check.sh stage` passes it. The skills ask the reader to check.
+- (Phase 55) Limitation: the same case seen live, a cleaning section traced to "Tips for Keeping Pets Hydrated".
+- (Phase 54) Limitation: a swapped primary keyword keeps the model's old rationale, with a line saying a person chose the term.
+- (2026-09-21) Limitation: with one editorial competitor, `must_cover` copies its table of contents. `check.sh research` warns when fewer than 3 competitors fetched.
+- (Phase 41) Limitation: running all four brief stages in one press removes the cheapest moment to catch a wrong intent stage. `--redo intent` rebuilds from there.
+- (Phase 10) Limitation: the call to action can promise what the business does not offer. `check.sh targets` grounds brands, and offers are the audit's to judge.
+
+**Schemas and plumbing**
+- (Phase 70) Finding: `fill_prompt.sh` lets an explicit `--set` satisfy any placeholder, and `gaps` went from 200 to 400 after replies cut at the cap.
+- (2026-09-22) Finding: every `maxLength` in `brief-stage.schema.json` was audited against the longest live value, and none was within 10% of its cap.
+- (Phase 59) Limitation: `check.sh truncated` catches a cut only when the value lands exactly on its cap. Raising the caps is the real fix.
 
 ---
 

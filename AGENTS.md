@@ -1136,8 +1136,13 @@ repos, and one ended in a colon with no template after it.)
 - **Environment labels for handed commands: `local terminal` and
   `Claude Code session`.** Use them in the form the README already uses,
   `# Runs in: local terminal`.
-- **There is no automated test suite. Verification is a live run by hand.**
+- **The automated suites are `bash tests/auto_contract.sh` and
+  `bash tests/checks.sh`, and both run before any change is handed back.**
+  Neither needs the router, the network or the GPU: a fake `curl` stands in for
+  the router. What the model writes is still verified by a live run by hand.
   Follow the skill's steps against the real router and report observed output.
+  `tests/live/verify_eval.sh` is the one live harness, run by hand after asking.
+  (Updated 2026-11-03 with Casey's yes: the suites date from Phases 91 and 96.)
   Those runs write to a scratch mirror of `briefs/` and `outputs/`, never to
   the repo directories, and the scratch files are removed before handoff.
 - **`./seo --auto <slug>` is the sanctioned unattended mode.** It fetches only the

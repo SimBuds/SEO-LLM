@@ -346,15 +346,16 @@ The three inputs below are what the launch intake asks for, so on a new page you
 can type their paths and URLs instead of placing them yourself. Placing them by
 hand works exactly the same, and is how you add to a page later.
 
-- **Keyword exports** go in `research/<slug>/inputs/` as CSV or TSV. The source
-  this pipeline is built around is the **Search Console Performance export**
-  (`Top queries`, `Clicks`, `Impressions`, `CTR`, `Position`), because those
-  numbers are measured rather than modelled. Columns are read by name, so any
-  other export works as downloaded too: a file carrying `Volume`, `Difficulty`,
-  `Traffic potential`, `CPC` or `Parent topic` still parses, and those fields
-  are recorded if you have them. Quoted fields containing commas are handled, a tab-separated file
-  named `.csv` is detected, and `%` and thousands separators are stripped from
-  numbers. Rows are merged by keyword, and each keyword lists the files it came
+- **Keyword exports** go in `research/<slug>/inputs/` as CSV or TSV. Two kinds
+  are read. The **Search Console Performance export** (`Top queries`, `Clicks`,
+  `Impressions`, `CTR`, `Position`) carries measured numbers and is preferred. A
+  keyword-tool export such as Ahrefs carries estimates (`Volume`, `Difficulty`,
+  `Traffic potential`, `CPC`, `Parent topic`) and is the fallback for a page or
+  site with no Search Console history yet. Columns are read by name, so either
+  works as downloaded, and every field is recorded if you have it. Quoted fields
+  containing commas are handled, a tab-separated file named `.csv` is detected,
+  an export saved as UTF-16 (as some Ahrefs versions do) is converted to UTF-8
+  first, and `%` and thousands separators are stripped from numbers. Rows are merged by keyword, and each keyword lists the files it came
   from. An export with no recognizable keyword column exits 3 and prints the
   columns it saw rather than writing empty rows.
 - **A keyword's market is part of its identity.** `Country`, `Market` or
@@ -587,20 +588,23 @@ The edit is checked against its input with `check.sh rewrite`: identical heading
 | `stage <structure-stage.json> <research.json> <keywords.json>` | a section whose `source` names evidence that is in neither the research nor the keyword choice | more than half the sections trace only to the page purpose |
 | `targets <targets-stage.json> <research.json>` | the call to action names a brand or business absent from the research | |
 | `truncated <data.json> <schema.json>` | a string sitting exactly on its schema `maxLength`, meaning the reply was cut off mid-word | |
-
-A `maxLength` truncates the reply rather than rejecting it, so a capped field
-arrives cut mid-word and nothing downstream can tell. `check.sh truncated` runs on
-every brief stage reply before it is written. A cut reply is treated like an
-unusable one and retried at the next seed, and when both seeds are cut the stage
-exits 3, names the field, and writes no stage file. Four caps have been raised on
-its evidence: `gaps` 200 to 400, `cta` 120 to 200, `cta_reason` 300 to 500 and
-`target_audience` 200 to 300, each after a live value landed exactly on the cap,
-twice ending in a stray CJK character. The
-remaining caps were audited against the longest values observed and none is within
-10% of binding.
 | `research <research.json>` | the file does not match the expected shape | no keywords, no volume column anywhere, no competitors, fewer than 3 fetched, a competitor that failed, an existing page with no title or no meta description |
 | `keywords <keywords.json> <research.json> [suggested.txt]` | the file does not match the expected shape, a keyword absent from the research and from your suggestions, the primary keyword repeated as a secondary, a superlative in the rationale the figures contradict | no questions, fewer than 2 must-cover subtopics, research figures repeated in the reasoning, a live page whose title does not contain the chosen keyword |
 | `draft <draft.md> <outline.md> <brief.json> [percent]` (`draft` for `draft.md`) | H1/H2 differ from the outline, outline guidance lines left in, numbers absent from the facts and the outline | length outside ±15%, CTA missing from Conclusion, a keyword used more than twice, bolded keywords, numbers not in the facts or outline, sentences with absolute wording (all, every, guaranteed…) |
+
+A `maxLength` truncates the reply rather than rejecting it, so a capped field
+arrives cut mid-word and nothing downstream can tell. `check.sh truncated` runs on
+every brief stage reply and every keyword reply before it is written. A cut reply
+is treated like an unusable one and retried at the next seed. When both seeds are
+cut, a brief stage exits 3, names the field and writes no stage file, and the
+keyword stage stops (`./seo --auto` exits 12) without leaving a `keywords.json`.
+Five caps have been raised on its evidence: `gaps` 200 to 400, `cta` 120 to 200,
+`cta_reason` 300 to 500 and `target_audience` 200 to 300, each after a live value
+landed exactly on the cap, twice ending in a stray CJK character, and the keyword
+`rationale` 500 to 900 after a measurement put 3 of 6 replies on the old cap and
+none on the new one (longest 738, Phase 104). The
+remaining caps were audited against the longest values observed and none is within
+10% of binding.
 
 A number, for every rule above, is a run of digits that starts a token. A digit
 that continues a word is part of a name, so "Everything4Cats", "MP3" and "H2O" are

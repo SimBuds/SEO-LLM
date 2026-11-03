@@ -879,6 +879,47 @@ expect "cwd: the brief prompt is the same byte for byte from the repo root and f
   bash -c 'sed "s#$3#TREE#g" "$1" > "$1.n" && sed "s#$4#TREE#g" "$2" > "$2.n" && [[ -s "$1.n" ]] && cmp -s "$1.n" "$2.n"' _ \
   "$T/research/$SLUG/brief-stages/01-intent.prompt.txt" "$ELSEWHERE_PROMPT" "$T" "$WORK/cwd-brief"
 
+# --- Phase 105: a keyword reply cut at a schema cap is never kept -----------
+# A maxLength truncates the reply rather than rejecting it, so a field landing
+# exactly on its cap was cut mid-word. Phase 104 measured 3 of 6 rationales cut
+# at the old 500 and none at 900.
+
+KCAP=$(jq '.properties.rationale.maxLength' "$ROOT/prompts/keywords.schema.json")
+expect "keyword schema: the rationale cap is 900, as Phase 104 measured" "cap $KCAP" test "$KCAP" = 900
+jq --argjson n 900 '.rationale = ("The head term fits the page purpose. " * 30)[0:$n]' "$FIX/keywords.json" > "$FIX/kw-cut.json"
+jq --argjson n 899 '.rationale = ("The head term fits the page purpose. " * 30)[0:$n]' "$FIX/keywords.json" > "$FIX/kw-899.json"
+jq '.intent.angle = ("how to choose one " * 10)[0:120]' "$FIX/keywords.json" > "$FIX/kw-angle-cut.json"
+expect "fixtures: the cut rationale sits on 900, the other one under it" "$(jq '.rationale|length' "$FIX/kw-cut.json") and $(jq '.rationale|length' "$FIX/kw-899.json")" \
+  test "$(jq '.rationale|length' "$FIX/kw-cut.json") $(jq '.rationale|length' "$FIX/kw-899.json")" = "900 899"
+
+tree kw-cut-once
+seed_research
+FAKE_POST="reply:$FIX/kw-cut.json,reply:$FIX/keywords.json,down" auto
+expect "keyword reply cut at seed 1: reseeded, and seed 2's reply is kept" "$(posts) calls, keywords.json: $(jq -c '.rationale|length' "$T/research/$SLUG/keywords.json" 2>&1)" \
+  bash -c 'grep -c "^post reply" "$1" | grep -qx 2 && cmp -s "$2" "$3"' _ "$T/fake/calls.log" "$FIX/keywords.json" "$T/research/$SLUG/keywords.json"
+expect "keyword reply cut at seed 1: the log says it was cut" "no cut message" saw "$T/out.txt" "cut off at a schema cap at seed 1"
+
+tree kw-cut-twice
+seed_research
+FAKE_POST="reply:$FIX/kw-cut.json,reply:$FIX/kw-cut.json,down" auto
+expect "keyword reply cut at both seeds: the keyword stage itself fails, with 12" "rc $RC, or the run reached the brief stages" \
+  bash -c '[[ $2 -eq 12 ]] && ! grep -qF -- "--- Brief stages" "$1" && grep -qF "cut off at a schema cap at seed 2" "$1"' _ "$T/out.txt" "$RC"
+expect "keyword reply cut at both seeds: no keywords.json is left to read as done" "keywords.json exists" \
+  test ! -e "$T/research/$SLUG/keywords.json"
+expect "keyword reply cut at both seeds: no .new file left" "a .new file is left" no_leftovers
+
+tree kw-angle-cut
+seed_research
+FAKE_POST="reply:$FIX/kw-angle-cut.json,reply:$FIX/keywords.json,down" auto
+expect "keyword reply with another field on its cap (intent.angle, 120): reseeded, seed 2 kept" "keywords.json angle: $(jq -r .intent.angle "$T/research/$SLUG/keywords.json" 2>&1 | head -c 60)" \
+  cmp -s "$FIX/keywords.json" "$T/research/$SLUG/keywords.json"
+
+tree kw-899
+seed_research
+FAKE_POST="reply:$FIX/kw-899.json,down" auto
+expect "keyword reply one under the cap: kept at seed 1" "$(posts) calls" \
+  bash -c 'grep -c "^post reply" "$1" | grep -qx 1 && cmp -s "$2" "$3"' _ "$T/fake/calls.log" "$FIX/kw-899.json" "$T/research/$SLUG/keywords.json"
+
 echo
 if (( FAILED )); then
   echo "$FAILED case(s) failed"

@@ -566,6 +566,17 @@ action_keywords() {
       err "the call failed, see the message above. The prompt is kept at $dir/_keywords_prompt.txt"
       return 1
     }
+    # A maxLength truncates rather than rejects, so a field sitting exactly on its
+    # cap was cut mid-word. Such a reply is unusable, as in the brief stages: it
+    # goes to the next seed and never becomes keywords.json. Phase 104 measured 3
+    # of 6 rationales cut at the old cap of 500 and none at 900.
+    if ! bash "$ROOT/scripts/check.sh" truncated "$dir/keywords.json.new" "$ROOT/prompts/keywords.schema.json"; then
+      rm -f "$dir/keywords.json.new"
+      err "the keyword reply was cut off at a schema cap at seed $seed"
+      (( seed >= 2 )) && { err "it was cut off at both seeds, so the stage stops. Read $dir/_keywords_prompt.txt"; return 1; }
+      seed=2
+      continue
+    fi
     mv "$dir/keywords.json.new" "$dir/keywords.json"
     jq . "$dir/keywords.json"
     local -a sugarg=()
