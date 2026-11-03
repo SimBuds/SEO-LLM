@@ -13,11 +13,13 @@
 #
 # --merge assembles the approved stages into briefs/<slug>.json and checks it.
 #
-# Env: RESEARCH_DIR (default research), BRIEFS_DIR (default briefs),
+# Env: RESEARCH_DIR (default research/ in this repo), BRIEFS_DIR (default briefs/
+#      in this repo), both found from the script's own path, not the working directory,
 #      STAGE_MODEL (default the wrapper's qwen).
 #
 # Exit codes: 1 usage, 2 missing input, 3 the model's reply was unusable twice,
-# 7 or 75 the router could not serve the model (llm_call.sh's code, passed up).
+# 7, 52, 56, 75 or 76 the router could not serve the model (llm_call.sh's code,
+# passed up, see router_down in lib_parts.sh).
 
 set -euo pipefail
 
@@ -25,7 +27,12 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # For router_down, which tells a router outage from an unusable reply.
 # shellcheck source=lib_parts.sh
 source "$HERE/lib_parts.sh"
-ROOT="${RESEARCH_DIR:-research}"
+# Every path is found from the repo this script lives in, so ./seo works from any
+# directory. Relative defaults read prompts and research from wherever the run was
+# started, and failed the brief stage there (Phase 93 finding, fixed in Phase 101).
+REPO=$(cd "$HERE/.." && pwd)
+ROOT="${RESEARCH_DIR:-$REPO/research}"
+BRIEFS="${BRIEFS_DIR:-$REPO/briefs}"
 TEMP=0.3
 
 # Stage order.
@@ -53,8 +60,7 @@ done
 # reporting "no research.json" for a misspelled type sends the reader to the
 # wrong problem.
 if [[ -n "$TYPE" ]]; then
-  TYPE_PROMPT="prompts/brief-type-$TYPE.md"
-  [[ -r "$TYPE_PROMPT" ]] || TYPE_PROMPT="$HERE/../prompts/brief-type-$TYPE.md"
+  TYPE_PROMPT="$REPO/prompts/brief-type-$TYPE.md"
   [[ -r "$TYPE_PROMPT" ]] || { echo "unknown content type: $TYPE (accepted: review)" >&2; exit 1; }
 fi
 
@@ -129,14 +135,14 @@ run_stage() { # run_stage <index> <stage>
   # response_format takes one concrete schema, so the stage's own object is
   # pulled out of the shared file. A stage with no schema is a bug, not a
   # free-form call.
-  jq -e --arg s "$stage" '.[$s]' prompts/brief-stage.schema.json > "$schema" \
+  jq -e --arg s "$stage" '.[$s]' "$REPO/prompts/brief-stage.schema.json" > "$schema" \
     || { echo "no schema for stage $stage in prompts/brief-stage.schema.json" >&2; exit 2; }
 
   # The facts stage reads a source document instead of the research: business
   # specifics come from what the user supplied, never from competitors.
   local source=""
   if [[ "$stage" == facts ]]; then
-    source="${BRIEFS_DIR:-briefs}/_ingest/$SLUG.txt"
+    source="$BRIEFS/_ingest/$SLUG.txt"
     if [[ ! -s "$source" ]]; then
       # No source means no facts. That is a real answer, so it is recorded
       # without spending a call on it.
@@ -146,7 +152,7 @@ run_stage() { # run_stage <index> <stage>
     fi
   fi
 
-  local -a fill=(prompts/brief-"$stage".md
+  local -a fill=("$REPO/prompts/brief-$stage.md"
     --set-file RESEARCH="$RESEARCH"
     --set-file KEYWORD_CHOICE="$KEYWORDS"
     --set PAGE_PURPOSE="$PURPOSE")
@@ -185,8 +191,7 @@ run_stage() { # run_stage <index> <stage>
   if [[ -n "$RECORDED_TYPE" ]]; then
     local recorded type_file
     recorded="$RECORDED_TYPE"
-    type_file="prompts/brief-type-$recorded.md"
-    [[ -r "$type_file" ]] || type_file="$HERE/../prompts/brief-type-$recorded.md"
+    type_file="$REPO/prompts/brief-type-$recorded.md"
     printf '\n' >> "$prompt"
     cat "$type_file" >> "$prompt"
   fi
@@ -248,7 +253,7 @@ target_words() {
   local counts median dropped kept
   # A brief that already exists carries the length the human settled on, and a
   # redo must not silently go back to the competitor median they overrode.
-  local existing="${BRIEFS_DIR:-briefs}/$SLUG.json"
+  local existing="$BRIEFS/$SLUG.json"
   if [[ -r "$existing" ]]; then
     median=$(jq -r '.word_count // empty' "$existing")
     if [[ "$median" =~ ^[0-9]+$ ]]; then echo "$median"; return 0; fi
@@ -281,7 +286,7 @@ merge_brief() {
     [[ -r "$f" ]] || { echo "stage $stage is missing ($f): run brief_stages.sh $SLUG first" >&2; exit 2; }
     i=$((i + 1))
   done
-  brief="${BRIEFS_DIR:-briefs}/$SLUG.json"
+  brief="$BRIEFS/$SLUG.json"
   if [[ -e "$brief" ]] && (( ! FORCE )); then
     echo "$brief already exists. Review it, then rerun with --merge --force to replace it." >&2
     exit 2
@@ -322,7 +327,7 @@ merge_brief() {
 
 if (( MERGE )); then
   merge_brief
-  jq . "${BRIEFS_DIR:-briefs}/$SLUG.json"
+  jq . "$BRIEFS/$SLUG.json"
   exit 0
 fi
 

@@ -10,7 +10,8 @@
 #   FETCH_UA         User-Agent (default SEO-LLM/1.0, no contact address)
 #   FETCH_CACHE_DIR  cache location (default $RESEARCH_DIR/_cache, so a run with
 #                    RESEARCH_DIR pointed at scratch never reads or writes the
-#                    repo cache; research/_cache when neither is set)
+#                    repo cache; research/_cache in this repo, found from the
+#                    script's own path, when neither is set)
 #   FETCH_CACHE_TTL  seconds a cached page stays fresh (default 86400)
 #   FETCH_DELAY      minimum seconds between requests to one host (default 2)
 #   FETCH_TIMEOUT    per-request timeout in seconds (default 20)
@@ -21,7 +22,10 @@
 set -euo pipefail
 
 UA="${FETCH_UA:-SEO-LLM/1.0}"
-CACHE_DIR="${FETCH_CACHE_DIR:-${RESEARCH_DIR:-research}/_cache}"
+# From the repo, not the working directory, so a run started elsewhere caches in
+# the repo (fixed in Phase 101).
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+CACHE_DIR="${FETCH_CACHE_DIR:-${RESEARCH_DIR:-$REPO/research}/_cache}"
 CACHE_TTL="${FETCH_CACHE_TTL:-86400}"
 MIN_DELAY="${FETCH_DELAY:-2}"
 TIMEOUT="${FETCH_TIMEOUT:-20}"

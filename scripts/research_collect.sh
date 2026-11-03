@@ -11,7 +11,8 @@
 # Writes research/<slug>/research.json, fetching each competitor page through
 # scripts/fetch_page.sh so robots.txt, the per-host delay and the cache all apply.
 #
-# Env: RESEARCH_DIR (default research) relocates the whole tree, which is how
+# Env: RESEARCH_DIR (default research/ in this repo, found from the script's own
+# path rather than the working directory) relocates the whole tree, which is how
 # verification runs stay out of the real one. MAX_KEYWORDS (default 150) caps how
 # many keywords reach research.json, taken from the head of the volume sort,
 # because a full keyword export is far larger than the model's context. 0 keeps
@@ -23,7 +24,10 @@
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-ROOT="${RESEARCH_DIR:-research}"
+# From the repo, not the working directory: run from elsewhere, the relative
+# default looked for the exports there (fixed in Phase 101).
+REPO=$(cd "$HERE/.." && pwd)
+ROOT="${RESEARCH_DIR:-$REPO/research}"
 
 SLUG="${1:?usage: research_collect.sh <slug> [--fresh]}"
 # --fresh ignores the HTML cache, so competitor pages are fetched again.

@@ -825,6 +825,60 @@ auto_100 "qwen listed with no context size at the call" 12 down "ok,ok,noctx"
 auto_100 "a /models reply that is not JSON at the call" 12 down "ok,ok,badjson"
 auto_100 "a timeout at the keyword call" 12 timeout
 
+# --- Phase 101: ./seo works from any directory -----------------------------
+# Every case above sets RESEARCH_DIR, BRIEFS_DIR and OUTPUTS_DIR. These run on a
+# copy of the repo with none of them set, started from a different directory,
+# so the scripts' own defaults decide where everything lands. Before, three
+# scripts resolved theirs against the working directory.
+
+# copy_tree <name>: a scratch tree that is also a copy of the repo's code
+copy_tree() {
+  tree "$1"
+  cp -r "$ROOT/seo" "$ROOT/scripts" "$ROOT/prompts" "$T/"
+  mkdir -p "$T/elsewhere"
+}
+# auto_from <dir>: ./seo --auto from that directory, with no *_DIR set
+auto_from() {
+  rm -f "$T"/fake/*
+  (cd "$1" && env -u RESEARCH_DIR -u BRIEFS_DIR -u OUTPUTS_DIR FAKE_DIR="$T/fake" \
+     timeout 120 "$T/seo" --auto "$SLUG") > "$T/out.txt" 2>&1
+  RC=$?
+}
+empty_dir() { [[ -z "$(find "$1" -mindepth 1 -print -quit)" ]]; }
+
+copy_tree cwd-collect
+seed_research
+rm "$T/research/$SLUG/research.json"
+printf '%s\n' 'Keyword,Volume' 'cat water fountain,900' 'quiet cat water fountain,200' > "$T/research/$SLUG/inputs/export.csv"
+printf '%s\n' 'https://competitor.example/page' > "$T/research/$SLUG/competitors.txt"
+FAKE_POST=down auto_from "$T/elsewhere"
+expect "cwd: collecting from another directory writes research.json inside the repo" "rc $RC, no research.json" \
+  test -s "$T/research/$SLUG/research.json"
+expect "cwd: collecting from another directory reads the repo's export" "$(jq -c '.keywords | map(.keyword)' "$T/research/$SLUG/research.json" 2>&1 | head -c 150)" \
+  bash -c 'jq -e "[.keywords[].keyword] | index(\"quiet cat water fountain\")" "$1" > /dev/null' _ "$T/research/$SLUG/research.json"
+expect "cwd: the directory the run started in is left untouched" "$(find "$T/elsewhere" -mindepth 1 | head -3)" \
+  empty_dir "$T/elsewhere"
+
+copy_tree cwd-brief
+seed_research
+cp "$FIX/keywords.json" "$T/research/$SLUG/keywords.json"
+FAKE_POST=down auto_from "$T/elsewhere"
+expect "cwd: the brief stage from another directory builds its prompt and makes its call" \
+  "rc $RC, calls: $(paste -sd' ' "$T/fake/calls.log" 2>&1)" \
+  bash -c '[[ $2 -eq 13 ]] && grep -q "^post down" "$1"' _ "$T/fake/calls.log" "$RC"
+expect "cwd: the brief stage from another directory leaves it untouched" "$(find "$T/elsewhere" -mindepth 1 | head -3)" \
+  empty_dir "$T/elsewhere"
+ELSEWHERE_PROMPT="$T/research/$SLUG/brief-stages/01-intent.prompt.txt"
+
+copy_tree cwd-brief-root
+seed_research
+cp "$FIX/keywords.json" "$T/research/$SLUG/keywords.json"
+FAKE_POST=down auto_from "$T"
+expect "cwd: the brief prompt is the same byte for byte from the repo root and from elsewhere" \
+  "the two 01-intent.prompt.txt differ or one is missing" \
+  bash -c 'sed "s#$3#TREE#g" "$1" > "$1.n" && sed "s#$4#TREE#g" "$2" > "$2.n" && [[ -s "$1.n" ]] && cmp -s "$1.n" "$2.n"' _ \
+  "$T/research/$SLUG/brief-stages/01-intent.prompt.txt" "$ELSEWHERE_PROMPT" "$T" "$WORK/cwd-brief"
+
 echo
 if (( FAILED )); then
   echo "$FAILED case(s) failed"
