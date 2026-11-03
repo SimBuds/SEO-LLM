@@ -304,7 +304,7 @@ action_collect() {
   local dir="$RESEARCH/$SLUG"
   mkdir -p "$dir/inputs"
   local n_inputs n_urls
-  n_inputs=$(find "$dir/inputs" -maxdepth 1 -type f \( -name '*.csv' -o -name '*.tsv' -o -name '*.txt' \) | wc -l)
+  n_inputs=$(find "$dir/inputs" -maxdepth 1 -type f \( -iname '*.csv' -o -iname '*.tsv' -o -iname '*.txt' \) | wc -l)
   n_urls=0
   [[ -r "$dir/competitors.txt" ]] && n_urls=$(grep -cve '^[[:space:]]*$' -e '^[[:space:]]*#' "$dir/competitors.txt")
   say ""
@@ -1172,7 +1172,7 @@ intake_inputs() { # the keyword exports and the competitor URLs
   mkdir -p "$dir/inputs"
 
   local n_inputs
-  n_inputs=$(find "$dir/inputs" -maxdepth 1 -type f \( -name '*.csv' -o -name '*.tsv' -o -name '*.txt' \) | wc -l)
+  n_inputs=$(find "$dir/inputs" -maxdepth 1 -type f \( -iname '*.csv' -o -iname '*.tsv' -o -iname '*.txt' \) | wc -l)
   if (( n_inputs == 0 )); then
     local line path
     say ""
@@ -1332,7 +1332,9 @@ auto_preflight() {
   [[ -z "$live" || "$live" =~ ^https?:// ]] \
     || auto_missing "$AUTO_FILE" "live_url is not an http(s) URL: $live" "live_url in $AUTO_FILE is not an http(s) URL: $live"
   if [[ ! -r "$dir/research.json" ]]; then
-    n_inputs=$(find "$dir/inputs" -maxdepth 1 -type f \( -name '*.csv' -o -name '*.tsv' -o -name '*.txt' \) 2>/dev/null | wc -l)
+    # -iname, as research_collect.sh matches names case-blind: an export saved as
+    # X.CSV was parsed but reported missing here (found 2026-09-21).
+    n_inputs=$(find "$dir/inputs" -maxdepth 1 -type f \( -iname '*.csv' -o -iname '*.tsv' -o -iname '*.txt' \) 2>/dev/null | wc -l)
     [[ -r "$dir/competitors.txt" ]] && n_urls=$(grep -cve '^[[:space:]]*$' -e '^[[:space:]]*#' "$dir/competitors.txt")
     (( n_inputs > 0 )) || auto_missing "$dir/inputs/" "no keyword export"
     (( n_urls > 0 )) || auto_missing "$dir/competitors.txt" "no competitor URL"

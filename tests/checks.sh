@@ -110,6 +110,73 @@ expect_eq "verify_part: the CTA sentence is never touched" "yes" "$(has "$S_CTA"
 expect_eq "verify_part: the report keeps each stub it turned into a deletion" "2" \
   "$(jq '[.issues[] | select(.accepted and .replacement == "" and .stub == "Clean the parts.")] | length' "$V/part/03-steps.verify.json" 2>&1)"
 
+# --- Phase 102: an input differing only in case, encoding or entity ---------
+# Every run here uses the fake curl above, so nothing reaches the network or
+# the router, and every tree is under $WORK.
+export PATH="$V/bin:$PATH" LLM_HOST="http://127.0.0.1:9"
+I="$WORK/inputs"
+mkdir -p "$I"
+printf 'Keyword\tVolume\ncat water fountain\t900\nquiet cat water fountain\t200\n' > "$I/utf8.csv"
+iconv -f UTF-8 -t UTF-16 "$I/utf8.csv" > "$I/utf16le.csv"
+{ printf '\xfe\xff'; iconv -f UTF-8 -t UTF-16BE "$I/utf8.csv"; } > "$I/utf16be.csv"
+{ printf '\xef\xbb\xbf'; cat "$I/utf8.csv"; } > "$I/utf8bom.csv"
+expect_eq "fixtures: the UTF-16 exports carry their byte order marks" "fffe feff" \
+  "$(head -c 2 "$I/utf16le.csv" | od -An -tx1 | tr -d ' \n') $(head -c 2 "$I/utf16be.csv" | od -An -tx1 | tr -d ' \n')"
+
+# collect <case> <export>: research_collect.sh on a page with only that export,
+# rows in RESULT, exit code in RC
+collect() {
+  local d="$WORK/collect-$1"
+  mkdir -p "$d/research/p/inputs"
+  printf '%s\n' '{"exists": false}' > "$d/research/p/page.json"
+  cp "$2" "$d/research/p/inputs/export.csv"
+  RESEARCH_DIR="$d/research" bash scripts/research_collect.sh p > "$d/out.txt" 2>&1
+  RC=$?
+  RESULT=$(jq -c '[.keywords[] | {keyword, volume, sources}]' "$d/research/p/research.json" 2>&1)
+}
+collect utf8 "$I/utf8.csv"; WANT="$RESULT"
+expect_eq "collect: a UTF-8 export parses (the reference)" "0 2" "$RC $(jq length <<< "$WANT" 2>&1)"
+collect utf16le "$I/utf16le.csv"
+expect_eq "collect: a UTF-16 LE export gives the same rows as the UTF-8 one" "0 $WANT" "$RC $RESULT"
+collect utf16be "$I/utf16be.csv"
+expect_eq "collect: a UTF-16 BE export gives the same rows as the UTF-8 one" "0 $WANT" "$RC $RESULT"
+collect utf8bom "$I/utf8bom.csv"
+expect_eq "collect: a UTF-8 export with a byte order mark is unchanged" "0 $WANT" "$RC $RESULT"
+
+# An export named X.CSV is counted by every count, as research_collect.sh
+# already parses it: the preflight, the intake and the collect stage's message.
+U="$WORK/upper"
+mkdir -p "$U/research/p/inputs" "$U/research/p/brief-stages" "$U/briefs/_ingest" "$U/outputs" "$U/fake"
+printf '%s\n' '{"exists": false}' > "$U/research/p/page.json"
+cp "$I/utf8.csv" "$U/research/p/inputs/EXPORT.CSV"
+printf '%s\n' 'https://competitor.example/page' > "$U/research/p/competitors.txt"
+echo "A guide." > "$U/research/p/brief-stages/purpose.txt"; : > "$U/research/p/type.txt"; : > "$U/research/p/suggested.txt"; : > "$U/briefs/_ingest/p.txt"
+FAKE_REPLY="$V/reply.json" RESEARCH_DIR="$U/research" BRIEFS_DIR="$U/briefs" OUTPUTS_DIR="$U/outputs" \
+  timeout 120 ./seo --auto p > "$U/auto.txt" 2>&1
+expect_eq "count: the preflight counts EXPORT.CSV and the run collects it" "no yes" \
+  "$(grep -qF 'no keyword export' "$U/auto.txt" && echo yes || echo no) $([[ -s "$U/research/p/research.json" ]] && echo yes || echo no)"
+mkdir -p "$U/m/research/p/inputs" "$U/m/outputs"
+cp "$U/research/p/page.json" "$U/research/p/competitors.txt" "$U/m/research/p/"
+cp "$I/utf8.csv" "$U/m/research/p/inputs/EXPORT.CSV"
+printf '2\n\nq\n' | timeout 120 script -qec "env PATH='$PATH' LLM_HOST='$LLM_HOST' RESEARCH_DIR='$U/m/research' BRIEFS_DIR='$U/briefs' OUTPUTS_DIR='$U/m/outputs' ./seo p" /dev/null > "$U/menu.txt" 2>&1
+expect_eq "count: the intake does not ask again for an export that is there" "no" \
+  "$(grep -qF 'Keyword exports to use' "$U/menu.txt" && echo yes || echo no)"
+expect_eq "count: the collect stage reports the export it will read" "yes" \
+  "$(grep -qF '(1 file(s) found)' "$U/menu.txt" && echo yes || echo no)"
+
+# fetch_page.sh on a cached page, so no request is made: the cache holds the
+# page and its robots.txt (a 404, so everything is allowed).
+C="$WORK/cache"
+mkdir -p "$C"
+url="https://shop.example/page"; robots="https://shop.example/robots.txt"
+k=$(printf '%s' "$url" | sha1sum | cut -c1-40); rk=$(printf '%s' "$robots" | sha1sum | cut -c1-40)
+printf '%s\n' '<html><head><title>Cat Bowls &ndash; Feeders &hellip;</title></head><body><h1>Fountains &ndash; a guide</h1></body></html>' > "$C/$k.body"
+echo "200 text/html; charset=utf-8" > "$C/$k.meta"
+: > "$C/$rk.body"; echo "404 text/plain" > "$C/$rk.meta"
+PAGE=$(FETCH_CACHE_DIR="$C" bash scripts/fetch_page.sh "$url" 2> "$C/fetch.err")   # stderr says "cache hit"
+expect_eq "entities: &ndash; in a title is decoded" "Cat Bowls – Feeders &hellip;" "$(jq -r '.title' <<< "$PAGE" 2>&1)"
+expect_eq "entities: &ndash; in a heading is decoded" "Fountains – a guide" "$(jq -r '.headings[0].text' <<< "$PAGE" 2>&1)"
+
 echo
 if (( FAILED )); then
   echo "$FAILED case(s) failed"

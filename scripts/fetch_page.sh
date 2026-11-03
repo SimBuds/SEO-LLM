@@ -190,10 +190,11 @@ esac
 # matches "&amp;" (measured 2026-09-22: "Cat Bowls &amp; Feeders", "... top 4
 # picks! &#8211; Three Chatty Cats"). Only the entities seen in live research are
 # decoded, and &amp; goes last so "&amp;amp;" decodes once, to "&amp;". Anything
-# else is left as written rather than guessed at.
+# else is left as written rather than guessed at. &ndash; joined the list after the
+# Happy & Polly title carried it twice in live research (Phase 80 finding).
 decode() {
   sed -e 's/&quot;/"/g' -e "s/&#39;/'/g" -e 's/&lt;/</g' -e 's/&gt;/>/g' \
-      -e 's/&nbsp;/ /g' -e 's/&#8211;/–/g' -e 's/&#8217;/’/g' \
+      -e 's/&nbsp;/ /g' -e 's/&#8211;/–/g' -e 's/&ndash;/–/g' -e 's/&#8217;/’/g' \
       -e 's/&#8220;/“/g' -e 's/&#8221;/”/g' -e 's/&amp;/\&/g'
 }
 

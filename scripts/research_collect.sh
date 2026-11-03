@@ -109,7 +109,16 @@ canonical_header() { # canonical_header <tsv-header-line>
 
 # One export file to a JSON array of keyword rows.
 export_to_json() { # export_to_json <file>
-  local file="$1" first delim tsv header
+  local file="$1" name first delim tsv header bom
+  name=$(basename "$1")
+  # Ahrefs has shipped UTF-16 exports. Read as bytes, one has no recognisable
+  # header and failed with exit 3, so a file opening with a UTF-16 byte order
+  # mark (either order) is converted to UTF-8 first. iconv consumes the mark.
+  bom=$(head -c 2 "$file" | od -An -tx1 | tr -d ' \n')
+  if [[ "$bom" == fffe || "$bom" == feff ]]; then
+    iconv -f UTF-16 -t UTF-8 "$file" > "$UTF8_FILE" || { echo "could not convert the UTF-16 export $file to UTF-8" >&2; exit 4; }
+    file="$UTF8_FILE"
+  fi
   first=$(head -1 "$file" | sed 's/^\xef\xbb\xbf//')   # drop a UTF-8 byte order mark
   # Sniff the delimiter: Ahrefs exports tab-separated files under a .csv name.
   if [[ $(tr -cd '\t' <<< "$first" | wc -c) -gt $(tr -cd ',' <<< "$first" | wc -c) ]]; then
@@ -120,12 +129,12 @@ export_to_json() { # export_to_json <file>
   tsv=$(sed '1s/^\xef\xbb\xbf//' "$file" | csv_to_tsv /dev/stdin "$delim")
   header=$(canonical_header "$(head -1 <<< "$tsv")")
   if ! grep -q $'\(^\|\t\)keyword\(\t\|$\)' <<< "$header"; then
-    echo "no keyword column in $file" >&2
+    echo "no keyword column in $1" >&2
     echo "  columns seen: $(head -1 <<< "$tsv" | tr '\t' '|')" >&2
     echo "  expected one of: keyword, keywords, query, top queries" >&2
     exit 3
   fi
-  { printf '%s\n' "$header"; tail -n +2 <<< "$tsv"; } | jq -R -s --arg src "$(basename "$file")" '
+  { printf '%s\n' "$header"; tail -n +2 <<< "$tsv"; } | jq -R -s --arg src "$name" '
     split("\n") | map(select(length > 0))
     | (.[0] | split("\t")) as $h
     | .[1:]
@@ -149,8 +158,8 @@ export_to_json() { # export_to_json <file>
 # Ahrefs export parses to several hundred KB, so --argjson died with "Argument
 # list too long" on the exports this pipeline exists to read. Found 2026-09-21 on
 # a 2782-row file.
-KW_FILE=$(mktemp); ROWS_FILE=$(mktemp)
-trap 'rm -f "$KW_FILE" "$ROWS_FILE" "$KW_FILE.new"' EXIT
+KW_FILE=$(mktemp); ROWS_FILE=$(mktemp); UTF8_FILE=$(mktemp)
+trap 'rm -f "$KW_FILE" "$ROWS_FILE" "$KW_FILE.new" "$UTF8_FILE"' EXIT
 echo '[]' > "$KW_FILE"
 INPUT_FILES=()
 if compgen -G "$DIR/inputs/*" > /dev/null; then
