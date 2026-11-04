@@ -76,9 +76,12 @@ case "$url" in
     echo "post $mode" >> "$FAKE_DIR/calls.log"
     case "$mode" in
       down)   echo "curl: (7) Failed to connect to the fake router" >&2; exit 7 ;;
-      noload) printf '%s' '{"error":{"code":500,"message":"model name=qwen failed to load","type":"server_error"}}'; exit 22 ;;
+      # The body of a reply captured whole from a real router, headers dropped as
+      # --fail-with-body drops them.
+      noload) sed '1,/^\r*$/d' "$FAKE_FIXTURES/router-noload.b12009.http"; exit 22 ;;
       empty)  echo "curl: (52) Empty reply from server" >&2; exit 52 ;;
       recv)   echo "curl: (56) Recv failure: Connection reset by peer" >&2; exit 56 ;;
+      # Not captured: build 12009's router held requests during a load instead.
       loading) printf '%s' '{"error":{"code":503,"message":"Loading model","type":"unavailable_error"}}'; exit 22 ;;
       toobig) printf '%s' '{"error":{"code":400,"message":"the request exceeds the available context size, try increasing it","type":"exceed_context_size_error"}}'; exit 22 ;;
       timeout) echo "curl: (28) Operation timed out after 120000 milliseconds with 0 bytes received" >&2; exit 28 ;;
@@ -93,7 +96,7 @@ case "$url" in
 esac
 FAKE
 chmod +x "$WORK/bin/curl"
-export PATH="$WORK/bin:$PATH" LLM_HOST="http://127.0.0.1:9"
+export PATH="$WORK/bin:$PATH" LLM_HOST="http://127.0.0.1:9" FAKE_FIXTURES="$ROOT/tests/fixtures"
 fake=$(command -v curl)
 [[ "$fake" == "$WORK/bin/curl" ]] || { echo "the fake curl is not first on PATH: $fake" >&2; exit 2; }
 
@@ -299,6 +302,8 @@ wrapper noload
 expect "wrapper: a model the router failed to load exits 75" "rc $RC" test "$RC" -eq 75
 expect "wrapper: the load failure's body is still printed" "stderr: $(head -c 200 "$T/stderr.txt")" \
   saw "$T/stderr.txt" "model name=qwen failed to load"
+expect "wrapper: the captured reply's header block is not passed on as body" "stderr: $(head -c 200 "$T/stderr.txt")" \
+  bash -c '! grep -qF "HTTP/1.1" "$1" && grep -qF "\"code\":500" "$1"' _ "$T/stderr.txt"
 wrapper toobig
 expect "wrapper: an oversized prompt still exits 22" "rc $RC" test "$RC" -eq 22
 wrapper "reply:$FIX/hello.txt"

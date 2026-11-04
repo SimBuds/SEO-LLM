@@ -905,7 +905,7 @@ which one. None of them are retried silently.
 | 7 | The router is unreachable | `systemctl --user is-active llama-server`, then check `LLM_HOST` |
 | 22 | The router returned an HTTP error | The body is printed. An oversized prompt reads `exceeds the available context size`, which means the input must shrink, not that the call should be retried. A body reading `model name=qwen failed to load` or `Loading model` exits 75 instead |
 | 52, 56 | The connection dropped before or during the reply (curl's empty reply and receive failure) | Usually the router restarting. `./seo --auto` exits 13 for it |
-| 75 | The router could not load the model (HTTP 500, `model name=qwen failed to load`), or it is still loading it (HTTP 503, `Loading model`) | Almost always another process holding the GPU, see below. `./seo --auto` exits 13 for it |
+| 75 | The router could not load the model (HTTP 500, `model name=qwen failed to load`), or it is still loading it (HTTP 503, `Loading model`) | Almost always another process holding the GPU, see below. `./seo --auto` exits 13 for it. The 500 body was captured from a real router on build 12009 and is the fixture `tests/fixtures/router-noload.b12009.http`. The 503 was not seen there: that router held every request sent during a load and answered once the model was up. The 503 match stays for a build or a direct `llama-server` that does send it |
 | 76 | `/models` does not list the model | The router was redeployed without `qwen`, or `LLM_MODEL` names a model it does not serve. `./seo --auto` exits 13 for it |
 
 Other things worth knowing:

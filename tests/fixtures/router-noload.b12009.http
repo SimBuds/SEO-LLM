@@ -1,0 +1,8 @@
+HTTP/1.1 500 Internal Server Error
+Server: llama.cpp
+Access-Control-Allow-Origin: 
+Content-Type: application/json; charset=utf-8
+Connection: close
+Content-Length: 87
+
+{"error":{"code":500,"message":"model name=qwen failed to load","type":"server_error"}}
