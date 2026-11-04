@@ -43,7 +43,7 @@ Every scripts/llm_call.sh call → POST localhost:8080/v1/chat/completions
   model qwen, system message prompts/system.md, thinking off
 ```
 
-Phases 1 to 13 and 16 to 38 are built, so a page goes from research to a finished article, and `./seo` walks a new page through its inputs first. Later phases add metadata and keywords (`meta.json`), a single `/seo-generate` command, and an SEO knowledge base. See [PLAN.md](PLAN.md) for the full phase breakdown, and [INSTRUCTIONS.md](INSTRUCTIONS.md) for a step-by-step walk through every stage.
+Phases 1 to 13 and 16 to 38 are built, so a page goes from research to a finished article, and `./seo` walks a new page through its inputs first. Later phases add metadata and keywords (`meta.json`), a single `/seo-generate` command, and an SEO knowledge base. See [PLAN.md](PLAN.md) for the full phase breakdown.
 
 ### Why this shape
 - **CC is the harness.** Skills replace a CLI, the Bash tool replaces a workflow engine, and files replace a database.
@@ -80,7 +80,6 @@ SEO-LLM/
 │                       # checks.sh: pins the deterministic helpers and checks, on fixtures
 │                       # live/verify_eval.sh: measures a prompts/verify.md change against the router, run by hand
 ├── AGENTS.md           # workflow contract for any AI agent in this repo
-├── INSTRUCTIONS.md     # stage-by-stage walk through the whole pipeline
 ├── PLAN.md             # architecture + phased MVP plan
 ├── README.md
 ```
@@ -129,6 +128,17 @@ SEO-LLM/
    The draft needs the outline, so running `/seo-draft` first stops with a message.
    Then polish it with `/seo-rewrite briefs/example.json`.
 6. Inspect `outputs/<slug>/outline.md`, `outputs/<slug>/draft.md`, and `outputs/<slug>/final.md`.
+7. A full page from research to audit is these commands in order:
+   ```
+   /seo-research client-page               # answer the page question, add exports and competitor URLs
+   /seo-keywords client-page               # pick the target keyword
+   /seo-ingest  briefs/client-page.pdf --text-only   # optional: the facts source, text only
+   /seo-brief   client-page                # four approved stages, then --merge
+   /seo-outline briefs/client-page.json
+   /seo-draft   briefs/client-page.json
+   /seo-rewrite briefs/client-page.json    # read outputs/client-page/final.md
+   /seo-audit   client-page                # the verdict, in outputs/client-page/audit.md
+   ```
 
 ## The menu
 
@@ -524,6 +534,11 @@ Posts a non-streaming request to `/v1/chat/completions` and prints `.choices[0].
 }
 ```
 
+`/seo-ingest` sets `word_count` from the page type it reads in the document:
+about 800 for an About page, 1,000 for Contact, 1,500 for an FAQ, and 2,000 for a
+standalone article. `/seo-brief` takes it from the competitor median instead, and
+the menu offers that as a default you can replace.
+
 Four optional keys carry the research forward when `/seo-brief` wrote the brief:
 
 ```json
@@ -556,6 +571,13 @@ and an outline missing something real still fails its check.
 
 `word_count` also sizes the outline: up to 1000 words gets 2 to 3 topic sections, up to 1800 gets 3 to 5, and longer gets 4 to 6, and the prompt is given those two numbers rather than the table to read. The H3 ceiling per section is derived the same way, from what a section of that article can afford at about 150 words per H3, because three H3s on a 400-word budget is where a draft starts choosing between its length and its headings (the table in [prompts/outline.md](prompts/outline.md), mirrored in `scripts/check.sh`).
 
+## Outline
+
+`/seo-outline` writes headings only, at temperature 0.3 seed 1. When `check.sh outline`
+fails, Claude Code asks whether to regenerate with seed 2, then seed 3. The same
+seed repeats the same outline, so rerunning without a new seed changes nothing.
+Warnings do not block the draft.
+
 ## Section-by-section drafting
 
 `/seo-draft` runs `scripts/draft_sections.sh <brief.json>`, which turns the outline into parts and drafts each with its own call:
@@ -564,7 +586,7 @@ and an outline missing something real still fails its check.
 - **Budget.** The draft aims at 120% of `word_count`, lowered from 135% on 2026-09-21 after two runs measured the rewrite cutting 13% and 17.5% rather than the 20 to 35% the old factor assumed, which put an article 39% over its target (`DRAFT_FACTOR` overrides). A lower factor for short pages left a thin-facts page 28% short, so the factor is the same at every length. A page that keeps some drafted text can overshoot, which only warns. Of that total: intro about 8%, conclusion about 6%, FAQ 60 words per question (at most 20%), and the rest split across topic sections by their H3 count. Each prompt asks for 90 to 110% of its budget.
 - **Keywords.** Each primary keyword keeps its cue in only the first two parts that list it (the intro counts as one use of the first keyword), and the FAQ gets none, because the model stuffs cues into its questions.
 - **Repairs.** After each call the script puts the outline's heading wording back when the heading structure matches, and strips bold. Then `check.sh section` runs. A failure is retried at the next two seeds (`DRAFT_SEED`, default 1, then +1 and +2), because the failures at different seeds have different causes: one live part came back 56% over budget at the first seed and fitted the budget by dropping a heading at the second. A third failure is saved as `.ERROR.md` and stops the run.
-- **Fact verification.** Each passing part gets a second call (`prompts/verify.md`, schema-constrained, temperature 0.1) that lists sentences the facts do not support, typed `invented`, `strengthened`, or `contradiction`, each with a replacement. The script applies replacements as literal swaps and rejects any that is not found verbatim, touches the CTA sentence, brings in words absent from the sentence and the facts (compared by first four letters), or, for `strengthened`, drops over half the sentence. Any other replacement keeping under half of its sentence is applied as a deletion, with the proposed text kept in the report as `stub`, because a stub such as "Clean the parts." reads worse than no sentence (the Phase 89 audit found it twice in one paragraph). Everything is logged in `sections/NN-<heading>.verify.json`. The original text stays in `.unverified.md`, and is restored if the verified part fails its check. Rejected issues remain in the draft for review. `VERIFY_MODEL=gemma` runs the verifier on Gemma instead. On the About test page the two flagged nearly the same sentences at the same speed.
+- **Fact verification.** Each passing part gets a second call (`prompts/verify.md`, schema-constrained, temperature 0.1, a 1,500-token limit and a 120-second timeout) that lists sentences the facts do not support, typed `invented`, `strengthened`, or `contradiction`, each with a replacement. The script applies replacements as literal swaps and rejects any that is not found verbatim, touches the CTA sentence, brings in words absent from the sentence and the facts (compared by first four letters), or, for `strengthened`, drops over half the sentence. Any other replacement keeping under half of its sentence is applied as a deletion, with the proposed text kept in the report as `stub`, because a stub such as "Clean the parts." reads worse than no sentence (the Phase 89 audit found it twice in one paragraph). Everything is logged in `sections/NN-<heading>.verify.json`. The original text stays in `.unverified.md`, and is restored if the verified part fails its check. Rejected issues remain in the draft for review. `VERIFY_MODEL=gemma` runs the verifier on Gemma instead. On the About test page the two flagged nearly the same sentences at the same speed.
 - **Resume.** Rerunning skips parts that exist and pass. Parts are discarded when `outline.md` is strictly newer than them, and by `--fresh`. Strictly, because the old test also fired when a part and the outline shared a timestamp to the second, which discarded a whole draft after a file copy. `DRAFT_SEED` moves the seed pair the loop tries, which is how the menu's `p` redraws one part.
 
 Every part sees the brief's audience, tone, facts, and the outline's headings, so it knows what the other sections cover without repeating them.
@@ -675,10 +697,21 @@ orphan its outline.
 
 `outputs/` and `briefs/_ingest/` are gitignored. The `_`-prefixed prompt files are
 kept on purpose: when a result looks wrong, they show exactly what the model was
-asked. Each stage pins its own sampling: ingest runs at temperature 0.2 seed 1,
-outline at 0.3 seed 1, each draft section at 0.5 seed 1, each fact check at 0.1 seed 1,
-and each rewrite at 0.7 seed 1. A failed check is retried with seed 2, because the
-same seed usually repeats the same output.
+asked.
+
+Each stage pins its own sampling, and a failed check moves to a new seed, because
+the same seed usually repeats the same output:
+
+| Stage | Model | Temperature | Seed | Retry |
+| --- | --- | --- | --- | --- |
+| research | none, no model call | n/a | n/a | rerun, or `--fresh` to refetch |
+| keywords | qwen | 0.2 | 1 | ask, then seed 2 (automatic on a cut reply) |
+| brief stage | qwen (`STAGE_MODEL`) | 0.3 | 1 | automatic, seed 2, then stop |
+| ingest | qwen | 0.2 | 1 | ask, then temperature 0.1 |
+| outline | qwen | 0.3 | 1 | ask, then seed 2 or 3 |
+| draft part | qwen | 0.5 | 1 (`DRAFT_SEED`) | automatic, the next two seeds |
+| fact check | qwen (`VERIFY_MODEL`) | 0.1 | 1 | on rerun |
+| rewrite part | qwen (`REWRITE_MODEL`) | 0.7 | 1 | automatic, seed 2 |
 
 ## Running without Claude Code
 
@@ -834,14 +867,29 @@ cd ~/Apps/SEO-LLM \
 
 `/seo-audit` writes `outputs/<slug>/audit.md` and edits nothing else. Line 2 is
 always `Verdict: PASS` or `Verdict: FAIL`. A FAIL is a `check.sh draft` failure, a
-business specific the facts do not state, text broken as written (such as a stub
-the fact checker left), or a keyword rationale the research contradicts, each
+business specific the facts do not state, text broken as written (a stub the fact
+checker left, a fragment, or a pronoun with nothing to refer to), or a keyword rationale the research contradicts, each
 quoted. Notes never change the verdict. `--settings .claude/settings.json` hands
 the project's allowlist to Claude Code explicitly, because a workspace whose trust
 dialog was never accepted ignores it, and the audit then cannot run its check or
 write its file. A PASS means the article is worth a person's reading, not that it
 is ready to publish: first-hand detail, original data and a named author still
 come from a person, and publishing is always theirs.
+
+## What still needs a person
+
+An unattended run still needs a person for the inputs it cannot make up (the
+keyword exports, the competitor URLs and the facts), for every exit 11, and for
+reading the article the audit passed.
+
+- **Finding the competitors.** You search Google and paste the top 3 to 5 URLs. The pipeline never fetches a results page.
+- **The call to action.** Stage 3 is where the model is most likely to promise something you do not offer, such as a downloadable checklist or a free trial. Read it before merging.
+- **The `omitted` list in stage 4.** Design notes and marketing adjectives belong there, but a real business detail can land there too.
+- **The brief.** The model sometimes overstates facts or turns design notes into facts.
+- **Absolute claims** that the fact checker flagged but could not safely fix. List them with:
+  `jq -r '.issues[]? | select(.accepted == false) | .sentence' outputs/<slug>/*/*.verify.json`
+- **Missed claims** in sections that kept their draft text, since those are not fact-checked a second time.
+- **Outlines for short pages** that have too many subsections. They push 800-word pages toward 940 words, so trim or regenerate the outline when `check.sh outline` warns.
 
 ## Troubleshooting
 
@@ -885,7 +933,7 @@ Other things worth knowing:
 
 ## Working in this repo
 
-[AGENTS.md](AGENTS.md) is the source of truth for how work happens here. Read it before making changes. The other pillars are [PLAN.md](PLAN.md) (architecture and the phased MVP plan) and this README (user-facing and developer-facing). [INSTRUCTIONS.md](INSTRUCTIONS.md) is a companion walk-through of the pipeline and must change with it.
+[AGENTS.md](AGENTS.md) is the source of truth for how work happens here. Read it before making changes. The other pillars are [PLAN.md](PLAN.md) (architecture and the phased MVP plan) and this README (user-facing and developer-facing).
 
 The fourth pillar, `IMPLEMENT.md`, is the execution tracker and holds the live state: which phase is active, what is done, what is deferred. It is untracked and gitignored on purpose, so a fresh clone has none. Its absence means no work is in flight, not that state was lost. Create it from the skeleton in `AGENTS.md` when you start a phase.
 

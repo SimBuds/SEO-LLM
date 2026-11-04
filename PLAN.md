@@ -116,7 +116,6 @@ SEO-LLM/
 ├── docs/
 │   └── google/              # planned (Phase 7): helpful-content.md, eeat.md, semantic-search.md, ai-content-guidelines.md
 ├── AGENTS.md
-├── INSTRUCTIONS.md          # stage-by-stage walk through the pipeline
 ├── PLAN.md
 └── README.md
 ```
