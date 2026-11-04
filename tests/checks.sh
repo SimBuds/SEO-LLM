@@ -177,6 +177,20 @@ PAGE=$(FETCH_CACHE_DIR="$C" bash scripts/fetch_page.sh "$url" 2> "$C/fetch.err")
 expect_eq "entities: &ndash; in a title is decoded" "Cat Bowls – Feeders &hellip;" "$(jq -r '.title' <<< "$PAGE" 2>&1)"
 expect_eq "entities: &ndash; in a heading is decoded" "Fountains – a guide" "$(jq -r '.headings[0].text' <<< "$PAGE" 2>&1)"
 
+# --- fill_prompt.sh: a --set-file value past the 128 KB argv limit ----------
+# Phase 109. Linux caps one argv string at 128 KB, and the keyword and brief
+# prompts carry research.json whole: at 550 keywords (121 KB) fill died with
+# "Argument list too long".
+printf 'A {{BIG}} Z\n' > "$WORK/big.tpl"
+printf '%0200000d' 0 > "$WORK/big.txt"
+OUT=$(bash scripts/fill_prompt.sh "$WORK/big.tpl" --set-file BIG="$WORK/big.txt" 2>&1)
+expect_eq "fill: a 200 KB --set-file value fills in full" "200004" "$(printf '%s' "$OUT" | wc -c)"
+printf 'A {{SMALL}} {{NAME}} Z\n' > "$WORK/small.tpl"; printf 'x\ny\n' > "$WORK/small.txt"
+expect_eq "fill: a small value fills as before" "A x
+y v Z" "$(bash scripts/fill_prompt.sh "$WORK/small.tpl" --set-file SMALL="$WORK/small.txt" --set NAME=v 2>&1)"
+bash scripts/fill_prompt.sh "$WORK/small.tpl" --set NAME=v > /dev/null 2> "$WORK/fill.err"
+expect_eq "fill: an unfilled placeholder still exits 1" "1 unfilled placeholders in $WORK/small.tpl: {{SMALL}}" "$? $(cat "$WORK/fill.err")"
+
 echo
 if (( FAILED )); then
   echo "$FAILED case(s) failed"

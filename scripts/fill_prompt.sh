@@ -52,10 +52,17 @@ if [[ -n "$SOURCE" ]]; then
   fi
 fi
 
+# The --set values reach jq through a file, not an argument: Linux caps one argv
+# string at 128 KB, and a research.json of 550 keywords (121 KB) died with
+# "Argument list too long" (Phase 109).
+EXTRA_FILE=$(mktemp)
+trap 'rm -f "$EXTRA_FILE"' EXIT
+printf '%s' "$EXTRA" > "$EXTRA_FILE"
+
 # split/join instead of gsub: values are literal text, never regex.
 FILLED=$(jq -nrj --rawfile t "$TEMPLATE" --argjson b "$BRIEF_JSON" \
   --arg outline "$OUTLINE_TEXT" --arg source "$SOURCE_TEXT" \
-  --arg has_outline "${OUTLINE:+1}" --arg has_source "${SOURCE:+1}" --argjson extra "$EXTRA" '
+  --arg has_outline "${OUTLINE:+1}" --arg has_source "${SOURCE:+1}" --slurpfile extra "$EXTRA_FILE" '
   (if $b == null then {} else {
       TOPIC: $b.topic,
       BRIEF: $b.topic,
@@ -88,7 +95,7 @@ FILLED=$(jq -nrj --rawfile t "$TEMPLATE" --argjson b "$BRIEF_JSON" \
     } end)
   + (if $has_outline == "1" then {OUTLINE: $outline} else {} end)
   + (if $has_source == "1" then {SOURCE_TEXT: $source} else {} end)
-  + $extra
+  + $extra[0]
   | reduce to_entries[] as $e ($t; split("{{" + $e.key + "}}") | join($e.value))
 ')
 
