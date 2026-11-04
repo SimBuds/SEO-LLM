@@ -375,14 +375,21 @@ hand works exactly the same, and is how you add to a page later.
   silently, and the keyword prompt's whole Case B is a comparison of volumes.
   `check.sh research` WARNs when a file holds more than one market, because the
   numbers in it are then not comparable with each other.
-- **The keyword list is capped at 150** (`MAX_KEYWORDS`, and `0` keeps every row),
+- **The keyword list is capped at 750** (`MAX_KEYWORDS`, and `0` keeps every row),
   taken from the head of the volume sort. A full Ahrefs "matching terms" export is
-  thousands of rows and several hundred KB, which is far past the 32768-token
-  context the keyword prompt has to fit in. `research.json` records
+  thousands of rows and several hundred KB, and the keyword prompt and the brief
+  stages carry the list whole. The cap keeps the keyword prompt at the same share
+  of the router's 131072-token window that the old cap of 150 used of 32768.
+  Measured with `qwen` `/tokenize` on a 1746-row export (2026-11-04): each
+  keyword costs about 79 tokens, and the keyword prompt with the system prompt and
+  reply is 16765 tokens at 150 (51.2% of 32768), 62589 at 750 (47.8% of
+  131072) and 67893 at 800 (51.8%, over the margin), so 750 is the largest
+  multiple of 50 inside it. The
+  largest brief stage, `03-targets`, is 18790 tokens at 150 and about 69900 at
+  800. `research.json` records
   `keywords_total` and a `keywords_cutoff` object naming how many were kept and
   dropped and the volume the cut landed on, and `check.sh research` WARNs about it,
-  so nobody reads the list as the whole file. Measured on a real export:
-  2782 rows in, the top 150 kept at volume 10 and above, `research.json` 31 KB.
+  so nobody reads the list as the whole file.
 - **Page furniture is dropped from competitor headings.** Whole-string matches for
   `About`, `Help`, `Services`, `Stores`, `Skip to`, `One Comment`, `Follow via
   Email` and the like never reach `research.json`, because those headings sit in

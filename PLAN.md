@@ -359,7 +359,7 @@ Each phase: one declarative goal, ≤5 files, atomic revert, end-to-end verifica
 ### Phase 40: Any size of keyword export parses, and the list is capped (done 2026-09-21)
 - Files: `scripts/research_collect.sh`, `scripts/check.sh`, `README.md`, `INSTRUCTIONS.md`.
 - The parsed export travels to `jq` through a file, not an argument: Linux caps one argv string at 128 KB whatever `ARG_MAX` says, so a 432 KB export died with "Argument list too long".
-- `MAX_KEYWORDS` (150) caps what reaches `research.json`, because 2782 rows would not fit the keyword prompt's 32768-token context. `keywords_total` and `keywords_cutoff` record the cut. An unreadable export exits 4 and writes nothing.
+- `MAX_KEYWORDS` caps what reaches `research.json`, because 2782 rows would not fit the keyword prompt's context. It was 150 for a 32768-token window and is 750 since Phase 110 (2026-11-04), measured to keep the keyword prompt at 51.2% of the 131072-token window (16765 tokens at 150, 67893 at 800). `keywords_total` and `keywords_cutoff` record the cut. An unreadable export exits 4 and writes nothing.
 
 ### Phase 41: The brief stages run in one press (done 2026-09-21)
 - Files: `scripts/seo.sh`, `README.md`, `INSTRUCTIONS.md`.

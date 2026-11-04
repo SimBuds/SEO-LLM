@@ -13,7 +13,7 @@
 #
 # Env: RESEARCH_DIR (default research/ in this repo, found from the script's own
 # path rather than the working directory) relocates the whole tree, which is how
-# verification runs stay out of the real one. MAX_KEYWORDS (default 150) caps how
+# verification runs stay out of the real one. MAX_KEYWORDS (default 750) caps how
 # many keywords reach research.json, taken from the head of the volume sort,
 # because a full keyword export is far larger than the model's context. 0 keeps
 # every row.
@@ -34,7 +34,9 @@ SLUG="${1:?usage: research_collect.sh <slug> [--fresh]}"
 if [[ "${2:-}" == "--fresh" ]]; then export FETCH_CACHE_TTL=0; fi
 
 # How many keywords may reach research.json, head of the volume sort. 0 keeps all.
-MAX_KEYWORDS="${MAX_KEYWORDS:-150}"
+# 750 keeps the keyword prompt at the share of a 131072 window that 150 used of
+# 32768 (51.2%), measured in Phase 110. See PLAN.md.
+MAX_KEYWORDS="${MAX_KEYWORDS:-750}"
 
 DIR="$ROOT/$SLUG"
 PAGE="$DIR/page.json"

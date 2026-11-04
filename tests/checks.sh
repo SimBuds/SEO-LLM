@@ -143,6 +143,19 @@ expect_eq "collect: a UTF-16 BE export gives the same rows as the UTF-8 one" "0 
 collect utf8bom "$I/utf8bom.csv"
 expect_eq "collect: a UTF-8 export with a byte order mark is unchanged" "0 $WANT" "$RC $RESULT"
 
+# The keyword cap. Phase 110 measured 750 as the count that keeps the keyword
+# prompt's 32768-era share (51.2%) of the 131072 window. 800 overshot it.
+{ printf 'Keyword\tVolume\n'; for i in $(seq 1 800); do printf 'kw %d\t%d\n' "$i" $((10000 - i)); done; } > "$I/800.csv"
+cutoff() { jq -c '[(.keywords | length), .keywords_cutoff.kept, .keywords_total]' "$WORK/collect-$1/research/p/research.json" 2>&1; }
+collect cap "$I/800.csv"
+expect_eq "cap: by default 750 of 800 keywords are kept and the cut is recorded" "0 [750,750,800]" "$RC $(cutoff cap)"
+MAX_KEYWORDS=0 collect cap0 "$I/800.csv"
+expect_eq "cap: MAX_KEYWORDS=0 keeps every row with no cutoff" "0 [800,null,800]" "$RC $(cutoff cap0)"
+MAX_KEYWORDS=150 collect cap150 "$I/800.csv"
+expect_eq "cap: MAX_KEYWORDS=150 still gives the old cap" "0 [150,150,800]" "$RC $(cutoff cap150)"
+collect capsmall "$I/utf8.csv"
+expect_eq "cap: an export under the cap keeps every row with no cutoff" "0 [2,null,2]" "$RC $(cutoff capsmall)"
+
 # An export named X.CSV is counted by every count, as research_collect.sh
 # already parses it: the preflight, the intake and the collect stage's message.
 U="$WORK/upper"
